@@ -1,0 +1,12 @@
+# GAME NIGHT server config. CLI flags override these (python3 server/main.py --help).
+
+port = 8000
+
+# Whoever types this at the name screen becomes the Host (start rounds, change
+# settings, kick). Change it! If left empty, a random one is printed each run.
+host_password = "change-me"
+
+# Optional gate for everyone else. "" means anyone with the URL can join.
+join_password = ""
+
+max_players = 12

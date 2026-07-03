@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAME NIGHT</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><rect width=%2216%22 height=%2216%22 fill=%22%230d0d1f%22/><circle cx=%228%22 cy=%228%22 r=%225%22 fill=%22%23ffd43b%22/><circle cx=%226.5%22 cy=%227%22 r=%221%22 fill=%22%230d0d1f%22/><circle cx=%229.5%22 cy=%227%22 r=%221%22 fill=%22%230d0d1f%22/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============================== JOIN ============================== -->
+<div id="scr-join" class="screen">
+  <div class="join-box">
+    <h1 class="title">GAME<span> </span>NIGHT</h1>
+    <p class="subtitle">grab a name · hop in the ring</p>
+    <div class="card">
+      <input id="in-name" maxlength="14" placeholder="YOUR NAME" autocomplete="off" spellcheck="false">
+      <input id="in-pw" placeholder="password (hosts type the host password)" autocomplete="off" spellcheck="false">
+      <div id="pw-hint" class="hint"></div>
+      <button id="btn-join" class="btn big">JOIN</button>
+      <div id="join-err" class="err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== LOBBY ============================= -->
+<div id="scr-lobby" class="screen hidden">
+  <div class="lobby-wrap">
+    <div class="lobby-col">
+      <h2>PLAYERS <span id="lobby-count" class="dim"></span></h2>
+      <div id="lobby-players" class="card list"></div>
+      <h2>SCOREBOARD <button id="btn-reset-scores" class="btn tiny hostonly hidden">reset</button></h2>
+      <div class="card">
+        <table class="tbl"><tbody id="lobby-score"></tbody></table>
+      </div>
+    </div>
+    <div class="lobby-col">
+      <h2>GAME</h2>
+      <div class="card">
+        <select id="game-select" class="wide"></select>
+        <p id="game-tag" class="dim tagline"></p>
+        <div id="settings-head" class="settings-head">GAME SETTINGS</div>
+        <div id="settings-form"></div>
+      </div>
+      <button id="btn-start" class="btn big go hostonly hidden">START ROUND</button>
+      <div id="lobby-wait" class="waiting">waiting for the host to start…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== GAME ============================== -->
+<div id="scr-game" class="screen hidden">
+  <div id="hud">
+    <div class="hud-left"><span id="hud-round"></span><span id="hud-game"></span></div>
+    <div class="hud-mid" id="hud-chips"></div>
+    <div class="hud-right"><span id="hud-alive"></span><span id="hud-ping"></span></div>
+  </div>
+  <div id="stage">
+    <canvas id="world" width="480" height="270"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="badge-out" class="badge hidden">YOU'RE OUT — spectating</div>
+    <div id="badge-spec" class="badge hidden">SPECTATING — you're in the next round</div>
+
+    <div id="intro" class="overlay hidden">
+      <div class="intro-round" id="intro-roundno"></div>
+      <div class="intro-name" id="intro-name"></div>
+      <div class="intro-tag" id="intro-tag"></div>
+      <div class="intro-chips" id="intro-chips"></div>
+      <div class="intro-controls" id="intro-controls"></div>
+      <div class="intro-count" id="intro-count"></div>
+    </div>
+
+    <div id="results" class="overlay hidden">
+      <div class="res-crown">👑</div>
+      <div class="res-winner" id="res-winner"></div>
+      <table class="tbl res"><tbody id="res-table"></tbody></table>
+      <div class="res-btns">
+        <button id="btn-again" class="btn go hostonly hidden">REMATCH</button>
+        <button id="btn-lobby" class="btn hostonly hidden">LOBBY</button>
+      </div>
+      <div id="res-auto" class="dim"></div>
+    </div>
+  </div>
+  <div id="hud-controls" class="controls-hint"></div>
+</div>
+
+<div id="toasts"></div>
+<div id="reconnect" class="hidden">⟳ reconnecting…</div>
+
+<script src="js/net.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
