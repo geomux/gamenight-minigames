@@ -1,4 +1,5 @@
 # GAME NIGHT 🕹️
+**co-authored with Anthropic Claude Fable 5 model - proof of concept with agentic loop in Claude Code for software design.**
 
 Browser-based, real-time multiplayer party games for you and your friends —
 short competitive rounds, one winner per round, tweak the settings, run it
