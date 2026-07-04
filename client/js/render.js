@@ -302,6 +302,29 @@ const Renderer = (() => {
     }
   }
 
+  function drawSnowball(x, y, vx, vy) {
+    const spd = Math.hypot(vx, vy) || 1;
+    const dx = vx / spd, dy = vy / spd;
+    // ground shadow, separated from the ball so it reads as airborne
+    wctx.fillStyle = "rgba(20,30,55,.30)";
+    wctx.beginPath(); wctx.ellipse(x + 1.5, y + 4, 3, 1.5, 0, 0, Math.PI * 2); wctx.fill();
+    // short velocity-aligned motion streak (2 ghost dots max)
+    for (let i = 2; i >= 1; i--) {
+      wctx.fillStyle = `rgba(220,232,248,${0.16 * i})`;
+      wctx.beginPath();
+      wctx.arc(x - dx * i * 3.2, y - dy * i * 3.2, 2.6 - i * 0.5, 0, Math.PI * 2);
+      wctx.fill();
+    }
+    // body: subtle blue tint pops it off the snow, crisp navy outline
+    wctx.fillStyle = "#e4edfb";
+    wctx.beginPath(); wctx.arc(x, y, 3.8, 0, Math.PI * 2); wctx.fill();
+    wctx.lineWidth = 1.2;
+    wctx.strokeStyle = "#12122a";
+    wctx.stroke();
+    wctx.fillStyle = "rgba(255,255,255,.85)";
+    wctx.fillRect(x - 1.6, y - 1.8, 1.4, 1.4);
+  }
+
   function drawSki(s) {
     const camPx = s.cam * S;
     wctx.save();                              // base snow, full scroll speed
@@ -322,12 +345,7 @@ const Renderer = (() => {
       if (ob[2] === 0) drawTree(ob[0] * S, sy); else drawRock(ob[0] * S, sy);
     }
     for (const b of liveProjectiles(skiBalls)) {   // snowballs, dead-reckoned
-      const x = b.x * S, y = (b.y - s.cam) * S;
-      wctx.fillStyle = "rgba(255,255,255,.5)";
-      wctx.fillRect(x - 1, y - 5, 2, 4);
-      wctx.fillStyle = "#fff";
-      wctx.beginPath(); wctx.arc(x, y, 2.5, 0, Math.PI * 2); wctx.fill();
-      wctx.strokeStyle = "#b8c6da"; wctx.lineWidth = 1; wctx.stroke();
+      drawSnowball(b.x * S, (b.y - s.cam) * S, b.vx, b.vy);
     }
     for (const e of s.ents) {
       if (e.alive) drawSkier(e);
@@ -469,6 +487,25 @@ const Renderer = (() => {
     }
   }
 
+  function drawBullet(x, y, vx, vy) {
+    const spd = Math.hypot(vx, vy) || 1;
+    const dx = vx / spd, dy = vy / spd;
+    const len = 7;                              // short velocity-aligned streak
+    const gx = x - dx * len, gy = y - dy * len;
+    const grad = wctx.createLinearGradient(gx, gy, x, y);
+    grad.addColorStop(0, "rgba(255,180,40,0)");
+    grad.addColorStop(1, "rgba(255,212,59,.9)");
+    wctx.strokeStyle = grad;
+    wctx.lineWidth = 2;
+    wctx.beginPath(); wctx.moveTo(gx, gy); wctx.lineTo(x, y); wctx.stroke();
+    wctx.fillStyle = "#3a2408";                  // dark outline
+    wctx.beginPath(); wctx.arc(x, y, 2.3, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "#ffd43b";                  // bright yellow core, high contrast on the sunset sky
+    wctx.beginPath(); wctx.arc(x, y, 1.5, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "rgba(255,255,255,.9)";
+    wctx.fillRect(x - 0.5, y - 0.5, 1, 1);
+  }
+
   function drawPlanes(s) {
     const t = performance.now();
     wctx.drawImage(skyBg, 0, 0);
@@ -480,13 +517,10 @@ const Renderer = (() => {
     const o2 = (t * 0.012) % W;               // near clouds pass over islands
     wctx.drawImage(cloudNear, -o2, 150);
     wctx.drawImage(cloudNear, W - o2, 150);
-    for (const b of liveProjectiles(planeBullets)) {   // tracers, dead-reckoned
+    for (const b of liveProjectiles(planeBullets)) {   // bullets, dead-reckoned
       const x = (((b.x % 960) + 960) % 960) * S;
       const y = (((b.y % 540) + 540) % 540) * S;
-      wctx.fillStyle = "rgba(255,212,59,.35)";
-      wctx.fillRect(x - 2, y - 2, 4, 4);
-      wctx.fillStyle = "#ffd43b";
-      wctx.fillRect(x - 1, y - 1, 2, 2);
+      drawBullet(x, y, b.vx, b.vy);
     }
     for (const e of s.ents) {
       if (!e.alive) continue;
