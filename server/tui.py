@@ -109,8 +109,11 @@ class Tui:
                       quit_]
             return items
         if st in ("countdown", "playing"):
+            pause = {"k": "pause", "kind": "action",
+                     "label": "RESUME" if self.room.paused else "PAUSE",
+                     "style": GOLD + BOLD}
             return [{"k": "abort", "kind": "action", "label": "ABORT ROUND",
-                     "style": RED + BOLD}, say, quit_]
+                     "style": RED + BOLD}, pause, say, quit_]
         return [{"k": "start", "kind": "action", "label": "REMATCH (same settings)",
                  "style": GREEN + BOLD},
                 {"k": "lobby", "kind": "action", "label": "Back to lobby"},
@@ -223,6 +226,8 @@ class Tui:
             self._action("start")
         elif k == "a" and self.room.state in ("countdown", "playing"):
             self._action("abort")
+        elif k == "p" and self.room.state in ("countdown", "playing"):
+            self._action("pause")
         elif k == "q":
             self._action("quit")
 
@@ -252,6 +257,8 @@ class Tui:
         if k == "start":
             err = self.room.start_round(by="terminal")
             self.status_msg = err or ""
+        elif k == "pause":
+            self.room.toggle_pause()
         elif k == "abort":
             self.room.abort_round()
         elif k == "lobby":
@@ -302,7 +309,10 @@ class Tui:
         if st == "countdown":
             L.append(f"  {GOLD}starting in {max(0, int(room._phase_end - now) + 1)}…{RESET}")
         elif st == "playing" and room.game:
-            L.append(f"  {GREEN}⚔ {room.game.status()}{RESET}")
+            if room.paused:
+                L.append(f"  {GOLD}⏸ PAUSED — {room.game.status()}{RESET}")
+            else:
+                L.append(f"  {GREEN}⚔ {room.game.status()}{RESET}")
         elif st == "results":
             L.append(f"  {PURP}results — lobby in {max(0, int(room._phase_end - now))}s{RESET}")
         else:

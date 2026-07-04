@@ -271,6 +271,77 @@ async def main_flow(port, proc):
     check(host.cells_seen > 100, f"trail cell deltas streamed ({host.cells_seen})")
     check(any(e[0] == "die" for e in host.fx), "cycles die events")
 
+    print("\n== round 4: avalanche run ==")
+    host.send({"t": "host", "a": "set_game", "g": "ski"})
+    await host.expect("room", where=lambda m: m["gameId"] == "ski", timeout=5)
+    host.send({"t": "host", "a": "set", "k": "round_time", "v": 60})
+    host.send({"t": "host", "a": "set", "k": "ramp", "v": "wild"})
+    host.send({"t": "host", "a": "set", "k": "bots", "v": 3})   # settings are per-game
+    host.send({"t": "host", "a": "set", "k": "bot_skill", "v": "mean"})
+    await host.expect("room", where=lambda m: m["settings"].get("bots") == 3, timeout=5)
+    host.fx = []
+    host.send({"t": "host", "a": "start"})
+    rnd = await host.expect("round", timeout=5)
+    check(rnd["game"]["id"] == "ski", "ski round started")
+    check(rnd["arena"].get("action") == "SNOWBALL", "ski arena drives the charge meter")
+    check(bool(rnd.get("preview", {}).get("obs")), "terrain preview in round msg")
+    await host.expect("go", timeout=6)
+    end = await host.expect("end", timeout=75)
+    check(len(end["placements"]) == 4, "ski: 4 placements")
+    kinds = {e[0] for e in host.fx}
+    check("wipe" in kinds, f"ski fx flowed ({sorted(kinds)})")
+    snap = host.last_snap or {}
+    check(snap.get("g") == "ski" and "cam" in snap, "ski snapshots carry the camera")
+
+    print("\n== round 5: aces high ==")
+    host.send({"t": "host", "a": "set_game", "g": "planes"})
+    await host.expect("room", where=lambda m: m["gameId"] == "planes", timeout=5)
+    host.send({"t": "host", "a": "set", "k": "round_time", "v": 60})
+    host.send({"t": "host", "a": "set", "k": "guns", "v": "blaster"})
+    host.send({"t": "host", "a": "set", "k": "bots", "v": 3})   # settings are per-game
+    host.send({"t": "host", "a": "set", "k": "bot_skill", "v": "mean"})
+    await host.expect("room", where=lambda m: m["settings"].get("bots") == 3, timeout=5)
+    host.fx = []
+    host.send({"t": "host", "a": "start"})
+    rnd = await host.expect("round", timeout=5)
+    check(rnd["game"]["id"] == "planes", "planes round started")
+    check(rnd["arena"].get("action") == "FIRE", "planes arena drives the charge meter")
+    check(len(rnd["arena"].get("islands", [])) == 3, "floating islands in arena")
+    check(len(rnd["arena"].get("gusts", [])) == 2, "wind gusts in arena")
+    await host.expect("go", timeout=6)
+
+    # host pause menu: freeze the whole sim, then resume
+    host.send({"t": "host", "a": "pause"})
+    pmsg = await host.expect("pause", timeout=5)
+    check(pmsg["on"] is True, "pause broadcast")
+    await asyncio.sleep(0.4)
+    n0 = host.snap_count
+    await asyncio.sleep(1.0)
+    check(host.snap_count == n0, "snapshots freeze while paused")
+    host.send({"t": "host", "a": "pause", "v": False})
+    pmsg = await host.expect("pause", timeout=5)
+    check(pmsg["on"] is False, "resume broadcast")
+    await asyncio.sleep(1.0)
+    check(host.snap_count > n0, "snapshots flow again after resume")
+
+    end = await host.expect("end", timeout=75)
+    check(len(end["placements"]) == 4, "planes: 4 placements")
+    kinds = {e[0] for e in host.fx}
+    check("shoot" in kinds and ("hitp" in kinds or "down" in kinds),
+          f"planes fx flowed ({sorted(kinds)})")
+
+    print("\n== pause menu 'end round' (ws host action) ==")
+    host.send({"t": "host", "a": "set_game", "g": "sumo"})
+    await host.expect("room", where=lambda m: m["gameId"] == "sumo", timeout=5)
+    host.send({"t": "host", "a": "start"})
+    await host.expect("round", timeout=5)
+    await host.expect("go", timeout=6)
+    host.send({"t": "host", "a": "pause"})
+    await host.expect("pause", timeout=5)
+    host.send({"t": "host", "a": "abort"})
+    await host.expect("room", where=lambda m: m["state"] == "lobby", timeout=5)
+    print("  ✓ pause → END ROUND returns everyone to the lobby")
+
     host.kill()
     return True
 

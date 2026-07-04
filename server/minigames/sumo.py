@@ -104,9 +104,12 @@ class SumoRing(MiniGame):
     # ------------------------------------------------------------------ setup
 
     def setup(self):
-        return {"g": self.ID, "w": WORLD_W, "h": WORLD_H,
-                "cx": CX, "cy": CY, "R0": R0,
-                "wind": bool(self.p["wind_a"])}
+        out = {"g": self.ID, "w": WORLD_W, "h": WORLD_H,
+               "cx": CX, "cy": CY, "R0": R0,
+               "wind": bool(self.p["wind_a"])}
+        if self.p["dash_v"] > 0:
+            out["action"] = "DASH"   # drives the big charge meter in the HUD
+        return out
 
     # ------------------------------------------------------------------ input
 

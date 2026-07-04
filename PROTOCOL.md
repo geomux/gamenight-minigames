@@ -13,7 +13,7 @@ in a fixed 960×540 world for Sumo and 96×54 grid cells for Light Cycles.
 |---|---|---|
 | join | `{"t":"join","name":str,"pw":str,"sess":str\|null}` | `pw` = host password ⇒ host; else must match join password if one is set. `sess` reclaims a previous seat (score survives reconnects). |
 | input | `{"t":"input","k":{"u":b,"d":b,"l":b,"r":b,"a":b}}` | Full key-state, sent on change + 1 s resend (self-healing). `a` = action/dash. |
-| host | `{"t":"host","a":action,...}` | Host only. Actions: `start`, `lobby`, `set_game {"g":id}`, `set {"k":key,"v":val}`, `kick {"p":pid}`, `reset_scores`. |
+| host | `{"t":"host","a":action,...}` | Host only. Actions: `start`, `pause` (toggle; optional `"v":bool` for explicit on/off), `abort`, `lobby`, `set_game {"g":id}`, `set {"k":key,"v":val}`, `kick {"p":pid}`, `reset_scores`. |
 | ping | `{"t":"ping","ts":n}` | Echoed back as `pong` for the HUD latency dot. |
 
 ## Server → Client
@@ -29,20 +29,42 @@ in a fixed 960×540 world for Sumo and 96×54 grid cells for Light Cycles.
 | s | `{"t":"s","g":gameId,…}` | State snapshot at snapshot-rate (default 15 Hz), **coalesced per client** (slow clients skip frames, never lag behind). |
 | fx | `{"t":"fx","ev":[…]}` | Reliable event list for juice (see below). |
 | end | `{"t":"end","placements":[[pid,place,pts]…],"totals":[[pid,wins,pts]…],"winner":[pids],"auto":secs}` | Round over. Placements use competition ranking (ties share a place). Auto-returns to lobby after `auto` seconds. |
+| pause | `{"t":"pause","on":bool}` | Host froze/unfroze the round. While paused the sim, countdown clock, and snapshots all stop; `round` msgs carry `"paused"` for late joiners. |
 | toast | `{"t":"toast","msg"}` | Announcement banner. |
 | kicked | `{"t":"kicked","msg"}` | Then the connection closes. |
 | pong | `{"t":"pong","ts"}` | Echo of `ping`. |
 
 ### Snapshots per game
 
+**Convention:** entity rows start `[pid, x, y, alive, charge, …]` — index 4
+is the player's 0–1 action charge (dash/snowball/fire; 1 = ready). Games with
+an action also send `"action":"LABEL"` in the arena payload; the client shows
+the big side charge meter whenever that's present. (Light Cycles has no
+action, hence no charge and no meter.)
+
 **Sumo** — `{"t":"s","g":"sumo","R":ringRadius,"e":[[pid,x,y,alive,dash01,r]…],"wind"?:[dx,dy]}`
-`dash01` = dash charge 0–1 (1 = ready). `r` = body radius.
+`r` = body radius.
 
 **Light Cycles** — `{"t":"s","g":"cycles","heads":[[pid,gx,gy,alive,dx,dy]…],"cells":[[gx,gy,pid]…],"margin":m}`
 `cells` are **deltas**: only cells claimed since the previous snapshot (a
 `full` snapshot — countdown preview or late join — carries every occupied
 cell). Clients accumulate them locally. `margin` = closing-wall depth in
 cells.
+
+**Avalanche Run** — `{"t":"s","g":"ski","cam":y,"spd":v,"e":[[pid,x,y,alive,ball01,tumble01]…],"obs":[[id,x,y,type]…],"balls":[[x,y]…]}`
+`cam` = world-y of the top of the screen (shared auto-scrolling camera —
+clients offset all world coords by it, and scroll their parallax layers from
+it). `obs` are **deltas** like cycles' cells: each obstacle (0 = tree,
+1 = rock) is sent exactly once; clients cull anything behind the camera.
+Entity `y` is absolute world-y.
+
+**Aces High** — `{"t":"s","g":"planes","e":[[pid,x,y,alive,fire01,ang,hp,inv]…],"b":[[x,y]…]}`
+`ang` = heading in centiradians (divide by 100). `hp` = hearts left, `inv` =
+1 during post-hit blink. `b` = live bullets. The world wraps at 960×540 —
+clients interpolate wrap-aware (shortest path across edges). The arena
+payload carries the static geometry: `"islands":[[x,y,r]…]` (solid — planes
+bounce, bullets stop) and `"gusts":[[x,y,r,ang100]…]` (directional shove
+zones; clients animate them and detect boost locally, zero extra wire cost).
 
 ### Fx events
 
@@ -54,6 +76,16 @@ cells.
 | die | `["die",pid,gx,gy]` | Cycle crashed (burst at grid cell) |
 | clear | `["clear",pid]` | Dead player's trail vanishes (trails=vanish) |
 | wall | `["wall",margin]` | Closing walls advanced one cell |
+| throw | `["throw",pid]` | Snowball thrown |
+| bonk | `["bonk",pid,x,screenY]` | Skier hit a tree/rock (y is screen-relative) |
+| splat | `["splat",victim,thrower]` | Snowball connected |
+| wipe | `["wipe",pid,x,screenY]` | The avalanche got them |
+| shoot | `["shoot",pid]` | Plane fired (muzzle flash) |
+| hitp | `["hitp",pid,x,y]` | Plane lost a heart |
+| clash | `["clash",x,y]` | Mid-air plane collision (sparks) |
+| down | `["down",pid,x,y]` | Plane destroyed (explosion + tumble) |
+| thud | `["thud",pid,x,y]` | Plane bounced off a floating island |
+| puff | `["puff",x,y]` | Bullet absorbed by an island |
 
 ### Settings schema
 

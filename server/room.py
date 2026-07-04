@@ -25,8 +25,12 @@ PURGE_AFTER = 600.0     # forget disconnected players after this long
 COLORS = ["#ff5a5a", "#ffa53b", "#ffe14d", "#8dff4d", "#3bffb0", "#3bd6ff",
           "#5a8bff", "#a06bff", "#ff6bd6", "#c9ff3b", "#ff8f6b", "#4dfff0"]
 
-BOT_NAMES = ["Craig.exe", "Botrick", "B0T Lasagna", "Roomba", "Clanker",
-             "Chad9000", "Toaster", "Beep Bop", "Dave.AI", "Bot Ross"]
+BOT_NAMES = ["Paarthurnax", "Dovahkiin", "Ender Dragon", "Herobrine",
+             "Leeroy Jenkins", "Saitama", "Naruto", "Kakashi", "Itachi",
+             "Gojo", "Luffy", "Zoro", "Goku", "Vegeta", "Kirby", "Waluigi",
+             "Bowser", "Ganondorf", "Sans", "GLaDOS", "Master Chief",
+             "Doomguy", "Kratos", "Geralt", "Solaire", "Patches",
+             "Tom Nook", "Big Smoke", "CJ", "Jigglypuff"]
 
 NO_KEYS = {"u": False, "d": False, "l": False, "r": False, "a": False}
 
@@ -70,6 +74,7 @@ class Room:
         self.settings = {self.game_id: default_settings(self.game_id)}
         self.game = None
         self.round_no = 0
+        self.paused = False
         self._phase_end = 0.0
         self._tick_no = 0
         self._last_ka = 0.0
@@ -248,6 +253,10 @@ class Room:
             err = self.start_round(by=p.name)
             if err:
                 self._send(p, {"t": "toast", "msg": err})
+        elif a == "pause":
+            self.toggle_pause(msg.get("v"))
+        elif a == "abort":
+            self.abort_round()
         elif a == "lobby":
             if self.state == "results":
                 self.to_lobby()
@@ -316,6 +325,7 @@ class Room:
             self.players.pop(b.pid, None)
         used = {p.name for p in self.players.values()}
         pool = [n for n in BOT_NAMES if n not in used]
+        random.shuffle(pool)
         while len(bots) < want:
             pid = self._next_pid
             self._next_pid += 1
@@ -366,6 +376,7 @@ class Room:
         roster = [{"pid": p.pid, "name": p.name, "bot": p.is_bot} for p in participants]
         self.round_no += 1
         self.game = cls(roster, dict(self.cur_settings()), random.Random())
+        self.paused = False
         self.state = "countdown"
         self._phase_end = self.loop.time() + COUNTDOWN
         self.log(f"[gn] round {self.round_no}: {cls.NAME} with "
@@ -383,6 +394,7 @@ class Room:
                "roster": [p["pid"] for p in self.game.roster]}
         if self.state == "countdown":
             msg["secs"] = max(0.0, round(self._phase_end - self.loop.time(), 2))
+        msg["paused"] = self.paused
         msg["preview"] = {"t": "s", **self.game.snapshot(full=True)}
         if joining:
             msg["spectate"] = True
@@ -419,6 +431,7 @@ class Room:
     def to_lobby(self):
         self.state = "lobby"
         self.game = None
+        self.paused = False
         now = self.loop.time()
         for p in list(self.players.values()):
             p.in_round = False
@@ -432,6 +445,17 @@ class Room:
             self.log("[gn] round aborted")
             self._toast("Round aborted by host.")
             self.to_lobby()
+
+    def toggle_pause(self, on=None):
+        """Freeze/unfreeze the whole round (host pause menu / terminal)."""
+        if self.state not in ("countdown", "playing"):
+            return False
+        want = (not self.paused) if on is None else bool(on)
+        if want != self.paused:
+            self.paused = want
+            self.log(f"[gn] round {'paused' if want else 'resumed'}")
+            self._bcast({"t": "pause", "on": want})
+        return True
 
     # ================================================================== loop
 
@@ -464,10 +488,14 @@ class Room:
                         p.conn.ping()
 
         if self.state == "countdown":
-            if now >= self._phase_end:
+            if self.paused:
+                self._phase_end += dt          # freeze the countdown clock
+            elif now >= self._phase_end:
                 self.state = "playing"
                 self._bcast({"t": "go"})
         elif self.state == "playing":
+            if self.paused:
+                return
             game = self.game
             if not game:
                 self.state = "lobby"
@@ -498,9 +526,9 @@ class Room:
             return ""
         cmd, args = parts[0].lower(), parts[1:]
         if cmd == "help":
-            return ("commands: start | lobby | abort | game <id> | set <key> <value>\n"
-                    "  settings | players | scores | resetscores | bots <n>\n"
-                    "  skill <easy|normal|mean> | kick <name> | say <msg> | quit")
+            return ("commands: start | pause | resume | lobby | abort | game <id>\n"
+                    "  set <key> <value> | settings | players | scores | resetscores\n"
+                    "  bots <n> | skill <easy|normal|mean> | kick <name> | say <msg> | quit")
         if cmd == "start":
             err = self.start_round(by="terminal")
             return err or "round starting…"
@@ -510,6 +538,9 @@ class Room:
         if cmd == "abort":
             self.abort_round()
             return "aborted"
+        if cmd in ("pause", "resume"):
+            ok = self.toggle_pause(cmd == "pause")
+            return ("paused" if self.paused else "resumed") if ok else "no round running"
         if cmd == "game":
             if not args:
                 return "games: " + ", ".join(GAMES)

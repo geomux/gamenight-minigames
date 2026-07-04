@@ -7,8 +7,10 @@ back. You host it on your own machine; friends just open a URL. **Zero
 dependencies**: pure Python standard library server + vanilla JS client. No
 pip, no accounts, no paid services.
 
-**Games so far:** Sumo Ring (bump friends off a shrinking ring) and
-Light Cycles (Tron — dodge walls and trails). Both run through the same
+**Games so far:** Sumo Ring (bump friends off a shrinking ring), Light
+Cycles (Tron — dodge walls and trails), Avalanche Run (ski the endless
+black diamond, snowball your friends, outrun the avalanche), and Aces High
+(steampunk dogfight over the clouds). All four run through the same
 pluggable shell, so adding more is easy (see [Extending](#extending)).
 
 ---
@@ -68,8 +70,15 @@ usually behind an old bookmark of a dead tunnel URL — send the fresh one.
    Scoreboard accumulates until the host resets it. Nobody ever sits out —
    knocked-out players spectate the rest of the round, then they're back in.
 
-**Controls:** WASD / arrows to move (turn, in Light Cycles) · SPACE to dash
-(Sumo). If you disconnect or refresh, you get your seat, name, and points
+**Pause:** the host presses **ESC** during a round (or countdown) to freeze
+the whole game for everyone — pause menu offers **RESUME** and **END ROUND**.
+ESC again also resumes. (Terminal: `pause` / `resume`, or `p` in the
+dashboard.)
+
+**Controls:** WASD / arrows to move (turn/bank in Cycles and Aces High) ·
+SPACE for your action — dash, snowball, or fire. A **big charge meter** on
+the right side of the screen fills up and pulses gold when your action is
+ready. If you disconnect or refresh, you get your seat, name, and points
 back automatically.
 
 ### The games
@@ -80,12 +89,26 @@ back automatically.
 - **Light Cycles** — everyone rides constantly, leaving a solid trail. Walls,
   trails, other players: touch anything and you're out. Optional wraparound
   edges, vanishing dead trails, and closing walls.
+- **Avalanche Run** — the mountain scrolls under everyone and keeps speeding
+  up while an avalanche chews the top of the screen. Dodge trees and rocks
+  (bonk = tumble = the avalanche gains on you), pelt friends with snowballs
+  to knock them into it. Last skier riding wins.
+- **Aces High** — steampunk dogfight at dusk. Planes always fly forward: bank,
+  throttle, brake, and hold SPACE to fire. Hearts instead of instant death,
+  edges wrap Asteroids-style, mid-air collisions bounce (or cost a heart with
+  **Ramming hurts** on). **Floating islands** are solid cover — planes bounce
+  off and bullets can't pass, so duck behind one to evade. **Wind gusts**
+  (animated swirls) shove you along their direction — ride one for a speed
+  boost. Both are settings (none / few / lots). Last ace flying wins; at the
+  time cap, most hearts.
 
 ### Bots
 
 Set **Bots** (0–6) and **Bot skill** (easy / normal / mean) in Game Settings —
 great for testing solo (`bots 3` in the terminal) or filling out small groups.
-Bots play both games and show up on the scoreboard like anyone else.
+Bots play all four games, show up on the scoreboard like anyone else, and
+answer to names like Paarthurnax, Saitama, Leeroy Jenkins, and Big Smoke.
+(Bot count is a per-game setting — set it for the game you're about to play.)
 
 ## Host controls
 
@@ -98,7 +121,7 @@ scoreboard, and log, plus an arrow-key menu:
 
 - **↑ / ↓** move · **← / →** change a value (game, any setting, bots)
 - **Enter** select (start round, kick submenu, say, reset, quit)
-- Quick keys: **s** start · **a** abort · **q** quit
+- Quick keys: **s** start · **p** pause/resume · **a** abort · **q** quit
 
 Settings lock while a round is live; if a round can't start, the dashboard
 tells you why (e.g. nobody connected yet — add bots or share the URL).
@@ -107,9 +130,10 @@ tells you why (e.g. nobody connected yet — add bots or share the URL).
 `--no-tui`) takes typed commands:
 
 ```
-start           begin a round            game sumo|cycles   switch game
-lobby           back to the lobby        set <key> <value>  change a setting
-abort           kill a stuck round       settings           show current settings
+start           begin a round            game <id>          sumo|cycles|ski|planes
+pause / resume  freeze the round         set <key> <value>  change a setting
+lobby           back to the lobby        settings           show current settings
+abort           kill a stuck round
 players         list everyone            scores             session scoreboard
 bots <n>        quick bot count          skill easy|normal|mean
 kick <name>     remove a player          resetscores        wipe the scoreboard
@@ -140,7 +164,11 @@ itself), `setup()` (static arena payload), `on_input()`, `tick(dt, events)`,
 `snapshot(full)`, `is_over()`, `placements()`, and optionally `bot_input()`.
 Register it with one line in `minigames/__init__.py`, add a matching draw
 branch in `client/js/render.js`, and it appears in the lobby dropdown.
-`cycles.py` (~250 lines) is the model to copy.
+`cycles.py` (~250 lines) is the model to copy; `ski.py` shows a scrolling
+camera with delta-synced terrain, `planes.py` shows projectiles + hearts.
+Convention: snapshot entity rows are `[pid, x, y, alive, charge, …]` — put
+your action's 0–1 charge at index 4 and set `"action": "LABEL"` in `setup()`
+and the big on-screen charge meter works for free.
 
 **Add a "modifier":** it's just a settings-schema entry plus however it tweaks
 your params. E.g. in `sumo.py`, add
@@ -152,14 +180,15 @@ intro screen announces anything non-default.
 ## Testing
 
 ```bash
-python3 tools/smoke_test.py   # full game E2E over real websockets
-python3 tools/tui_test.py     # drives the terminal dashboard through a pty
+python3 tools/smoke_test.py    # full game E2E over real websockets
+python3 tools/tui_test.py      # drives the terminal dashboard through a pty
+node tools/render_check.js     # exercises every game's canvas draw path
 ```
 
-`smoke_test.py` boots the real server and plays both games end-to-end: lobby,
-passwords, settings, bot rounds, scoring, reconnect, terminal commands, kick.
-`tui_test.py` types real arrow keys into the dashboard. Both passing means
-the game actually works headless.
+`smoke_test.py` boots the real server and plays **all four games** end-to-end:
+lobby, passwords, settings, bot rounds, scoring, reconnect, terminal commands,
+kick. `tui_test.py` types real arrow keys into the dashboard. All passing
+means the game actually works headless.
 
 ## Troubleshooting
 

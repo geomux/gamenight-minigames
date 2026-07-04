@@ -200,6 +200,13 @@ function startRound(m) {
   const inRoster = App.you && m.roster.includes(App.you.id);
   $("badge-spec").classList.toggle("hidden", !!inRoster);
 
+  // big action-charge meter (DASH / SNOWBALL / FIRE), only when this game
+  // has an action and I'm actually playing
+  App.hasAction = !!(m.arena && m.arena.action && inRoster);
+  $("charge-label").textContent = (m.arena && m.arena.action) || "";
+  $("charge-meter").classList.toggle("hidden", !App.hasAction);
+  $("charge-meter").classList.remove("ready");
+
   // intro overlay with countdown
   if (m.phase === "countdown") {
     $("intro").classList.remove("hidden");
@@ -232,6 +239,8 @@ function onGo() {
 
 function onEnd(m) {
   App.phase = "results";
+  $("charge-meter").classList.add("hidden");
+  setPaused(false);
   const totals = new Map(m.totals.map(([pid, wins, pts]) => [pid, { wins, pts }]));
   const winners = m.winner.map((pid) => (App.players.get(pid) || {}).name || "?");
   $("res-winner").textContent = winners.join(" & ") || "NOBODY";
@@ -282,6 +291,14 @@ function sendKeys(force) {
 }
 
 window.addEventListener("keydown", (e) => {
+  if (e.code === "Escape") {
+    // host pause menu: Esc freezes the round for everyone, Esc again resumes
+    if (App.you && App.you.host && (App.phase === "playing" || App.phase === "countdown")) {
+      e.preventDefault();
+      Net.send({ t: "host", a: "pause" });
+    }
+    return;
+  }
   if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
   const k = KEYMAP[e.code];
   if (!k) return;
@@ -347,6 +364,7 @@ Net.on("room", (m) => {
   if (m.state === "lobby" && App.phase !== "join" && App.phase !== "lobby") {
     App.phase = "lobby";
     clearInterval(App.resTimer);
+    setPaused(false);
     showScreen("lobby");
   }
   if (App.phase !== "join") renderLobby();
@@ -355,18 +373,37 @@ Net.on("room", (m) => {
 Net.on("round", (m) => {
   startRound(m);
   if (m.preview) Renderer.addSnapshot(m.preview);
+  setPaused(!!m.paused);
 });
 Net.on("go", onGo);
+
+function setPaused(on) {
+  App.paused = on;
+  $("pause").classList.toggle("hidden", !on);
+  $("pause-sub").textContent =
+    on && !(App.you && App.you.host) ? "the host paused the round" : "";
+  if (on) applyHostUI();
+}
+Net.on("pause", (m) => setPaused(m.on));
 
 Net.on("s", (m) => {
   App.latestSnap = m;
   Renderer.addSnapshot(m);
-  const rows = m.e || m.heads || [];   // both games: [pid, x, y, alive, ...]
+  const rows = m.e || m.heads || [];   // all games: [pid, x, y, alive, charge?, …]
   const alive = rows.filter((e) => e[3]).length;
   $("hud-alive").textContent = `${alive} ALIVE`;
   if (App.you) {
     const mine = rows.find((e) => e[0] === App.you.id);
     $("badge-out").classList.toggle("hidden", !(mine && !mine[3] && App.phase === "playing"));
+    if (App.hasAction) {
+      const dead = !mine || !mine[3];
+      $("charge-meter").classList.toggle("hidden", dead || App.phase === "results");
+      if (!dead) {
+        const charge = Math.max(0, Math.min(1, mine[4] ?? 0));
+        $("charge-fill").style.height = Math.round(charge * 100) + "%";
+        $("charge-meter").classList.toggle("ready", charge >= 1);
+      }
+    }
   }
 });
 
@@ -408,6 +445,8 @@ $("btn-start").onclick = () => Net.send({ t: "host", a: "start" });
 $("btn-again").onclick = () => Net.send({ t: "host", a: "start" });
 $("btn-lobby").onclick = () => Net.send({ t: "host", a: "lobby" });
 $("btn-reset-scores").onclick = () => Net.send({ t: "host", a: "reset_scores" });
+$("btn-resume").onclick = () => Net.send({ t: "host", a: "pause", v: false });
+$("btn-endround").onclick = () => Net.send({ t: "host", a: "abort" });
 $("game-select").onchange = (e) => Net.send({ t: "host", a: "set_game", g: e.target.value });
 
 Net.connect();

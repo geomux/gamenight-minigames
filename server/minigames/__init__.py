@@ -2,8 +2,10 @@
 
 from .sumo import SumoRing
 from .cycles import LightCycles
+from .ski import AvalancheRun
+from .planes import AcesHigh
 
-GAMES = {SumoRing.ID: SumoRing, LightCycles.ID: LightCycles}
+GAMES = {g.ID: g for g in (SumoRing, LightCycles, AvalancheRun, AcesHigh)}
 
 GAME_LIST = [{"id": g.ID, "name": g.NAME, "tag": g.TAG} for g in GAMES.values()]
 

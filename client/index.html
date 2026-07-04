@@ -62,6 +62,12 @@
     <div id="badge-out" class="badge hidden">YOU'RE OUT — spectating</div>
     <div id="badge-spec" class="badge hidden">SPECTATING — you're in the next round</div>
 
+    <div id="charge-meter" class="hidden">
+      <div id="charge-bolt">⚡</div>
+      <div id="charge-track"><div id="charge-fill"></div></div>
+      <div id="charge-label">DASH</div>
+    </div>
+
     <div id="intro" class="overlay hidden">
       <div class="intro-round" id="intro-roundno"></div>
       <div class="intro-name" id="intro-name"></div>
@@ -69,6 +75,16 @@
       <div class="intro-chips" id="intro-chips"></div>
       <div class="intro-controls" id="intro-controls"></div>
       <div class="intro-count" id="intro-count"></div>
+    </div>
+
+    <div id="pause" class="overlay hidden">
+      <div class="pause-big">⏸ PAUSED</div>
+      <div id="pause-sub" class="dim"></div>
+      <div class="res-btns">
+        <button id="btn-resume" class="btn go hostonly hidden">RESUME</button>
+        <button id="btn-endround" class="btn hostonly hidden">END ROUND</button>
+      </div>
+      <div class="dim pause-esc">host: ESC toggles pause</div>
     </div>
 
     <div id="results" class="overlay hidden">

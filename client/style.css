@@ -243,3 +243,45 @@ select.wide { width: 100%; text-transform: uppercase; letter-spacing: 1px; }
   .lobby-wrap { flex-direction: column; overflow-y: auto; max-height: 94vh; }
   .list { max-height: 20vh; }
 }
+
+/* ------------------------- action charge meter ------------------------- */
+
+#charge-meter {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  z-index: 22; width: 56px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none;
+}
+#charge-bolt { font-size: 24px; filter: grayscale(1) opacity(.45); }
+#charge-track {
+  width: 22px; height: 150px;
+  background: rgba(13,13,31,.85);
+  border: 2px solid var(--line);
+  box-shadow: 0 0 0 2px #000;
+  display: flex; align-items: flex-end;
+}
+#charge-fill {
+  width: 100%; height: 0%;
+  background: linear-gradient(180deg, #ffe98a, var(--gold) 60%, #b07f00);
+  transition: height .12s linear;
+}
+#charge-label {
+  font-size: 10px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase;
+}
+#charge-meter.ready #charge-bolt { filter: none; animation: boltpulse .9s ease-in-out infinite; }
+#charge-meter.ready #charge-track {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px #000, 0 0 16px rgba(255,212,59,.55);
+}
+#charge-meter.ready #charge-label { color: var(--gold); }
+@keyframes boltpulse { 50% { transform: scale(1.3); } }
+@media (max-width: 700px) { #charge-meter { right: 6px; } #charge-track { height: 110px; } }
+
+/* ------------------------------ pause menu ------------------------------ */
+
+.pause-big {
+  font-size: clamp(30px, 6vw, 50px); color: var(--gold); letter-spacing: 4px;
+  text-shadow: 0 0 22px rgba(255,212,59,.4), 4px 4px 0 #000;
+}
+#pause-sub { margin-top: 6px; font-size: 13px; }
+.pause-esc { margin-top: 16px; font-size: 11px; letter-spacing: 1px; }

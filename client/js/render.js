@@ -38,6 +38,14 @@ const Renderer = (() => {
   let trailCv = null, trailCtx = null, gridDots = null;
   let cellW = 5, cellH = 5;
 
+  // avalanche-run state
+  let obsMap = new Map();          // id -> [x, y, type]  (world coords)
+  let skiSnowPat = null, skiSpeck = null;
+
+  // aces-high state
+  let skyBg = null, cloudFar = null, cloudNear = null;
+  let isleCv = null;               // cached island layer for this round
+
   /* ------------------------------ helpers ------------------------------ */
 
   function shade(hex, f) {
@@ -151,6 +159,327 @@ const Renderer = (() => {
     }
   }
 
+  /* ----------------------------- ski helpers ----------------------------- */
+
+  function buildSkiLayers() {
+    const tile = document.createElement("canvas");
+    tile.width = 64; tile.height = 64;
+    let c = tile.getContext("2d");
+    c.fillStyle = "#cfdbea";
+    c.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 30; i++) {
+      c.fillStyle = Math.random() < 0.5 ? "#bccadd" : "#e6eef9";
+      c.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 1, 1);
+    }
+    skiSnowPat = wctx.createPattern(tile, "repeat");
+    skiSpeck = document.createElement("canvas");   // slower parallax layer
+    skiSpeck.width = W; skiSpeck.height = H;
+    c = skiSpeck.getContext("2d");
+    c.fillStyle = "rgba(120,140,170,.16)";
+    for (let i = 0; i < 44; i++) {
+      c.fillRect((Math.random() * W) | 0, (Math.random() * H) | 0,
+                 (2 + Math.random() * 6) | 0, 2);
+    }
+  }
+
+  function drawTree(x, y) {
+    wctx.fillStyle = "rgba(60,80,110,.30)";
+    wctx.beginPath(); wctx.ellipse(x + 2, y + 5, 6, 3, 0, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "#5a3d20";
+    wctx.fillRect(x - 1, y + 3, 2, 4);
+    wctx.fillStyle = "#245233";
+    wctx.beginPath(); wctx.moveTo(x - 6, y + 4); wctx.lineTo(x + 6, y + 4); wctx.lineTo(x, y - 4); wctx.fill();
+    wctx.fillStyle = "#2e6b3f";
+    wctx.beginPath(); wctx.moveTo(x - 5, y); wctx.lineTo(x + 5, y); wctx.lineTo(x, y - 8); wctx.fill();
+    wctx.fillStyle = "#eef4fb";
+    wctx.fillRect(x - 1, y - 8, 3, 1);
+  }
+
+  function drawRock(x, y) {
+    wctx.fillStyle = "rgba(60,80,110,.30)";
+    wctx.beginPath(); wctx.ellipse(x + 2, y + 5, 7, 3, 0, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "#8a93a3";
+    wctx.beginPath();
+    wctx.moveTo(x - 7, y + 4); wctx.lineTo(x - 4, y - 4); wctx.lineTo(x + 3, y - 5);
+    wctx.lineTo(x + 7, y + 2); wctx.lineTo(x + 4, y + 5);
+    wctx.fill();
+    wctx.fillStyle = "#6d7686";
+    wctx.fillRect(x, y, 4, 3);
+    wctx.fillStyle = "#eef4fb";
+    wctx.fillRect(x - 3, y - 4, 5, 1);
+  }
+
+  function drawSkier(e) {
+    const m = meta.get(e.pid) || { color: "#888" };
+    const { x, y } = e;
+    wctx.fillStyle = "rgba(60,80,110,.30)";
+    wctx.beginPath(); wctx.ellipse(x + 1, y + 4, 5, 2.5, 0, 0, Math.PI * 2); wctx.fill();
+    wctx.save();
+    wctx.translate(x, y);
+    if (e.tumble > 0) wctx.rotate(Math.sin(performance.now() / 40) * 1.2);
+    else wctx.rotate(Math.max(-0.6, Math.min(0.6, e.vx * 0.025)));
+    wctx.strokeStyle = "#5a3d20";
+    wctx.lineWidth = 1.5;
+    wctx.beginPath();
+    wctx.moveTo(-3, 2); wctx.lineTo(-3, 9);
+    wctx.moveTo(3, 2); wctx.lineTo(3, 9);
+    wctx.stroke();
+    wctx.fillStyle = m.color;
+    wctx.beginPath(); wctx.arc(0, 0, 6, 0, Math.PI * 2); wctx.fill();
+    wctx.lineWidth = 1.2;
+    wctx.strokeStyle = shade(m.color, 0.55);
+    wctx.stroke();
+    wctx.fillStyle = "#12122a";               // goggles
+    wctx.fillRect(-3, -2, 6, 2);
+    wctx.fillStyle = "rgba(255,255,255,.6)";
+    wctx.fillRect(-2, -2, 1, 1);
+    wctx.restore();
+    if (e.tumble > 0) {                       // dizzy stars
+      const t = performance.now() / 150;
+      wctx.fillStyle = "#ffe14d";
+      for (let i = 0; i < 3; i++) {
+        const a = t + i * 2.09;
+        wctx.fillRect(x + Math.cos(a) * 9 - 1, y - 8 + Math.sin(a) * 3, 2, 2);
+      }
+    }
+  }
+
+  function drawAvalanche() {
+    const t = performance.now();
+    const band = 13;
+    wctx.fillStyle = "#e8eef7";
+    wctx.fillRect(0, 0, W, band - 4);
+    for (let i = 0; i < 26; i++) {            // churning front
+      const x = (i * 19 + t / (30 + (i % 5) * 9)) % W;
+      const y = band - 6 + Math.sin(t / 90 + i) * 3;
+      wctx.fillStyle = i % 3 ? "#f6fafe" : "#c3d2e4";
+      wctx.beginPath(); wctx.arc(x, y, 4 + (i % 3) * 2, 0, Math.PI * 2); wctx.fill();
+    }
+    if (Math.random() < 0.5) {
+      particles.push({ x: Math.random() * W, y: band, vx: (Math.random() - 0.5) * 20,
+                       vy: 30 + Math.random() * 40, life: 0.4, t: 0, size: 1,
+                       color: "#fff", grav: 0 });
+    }
+  }
+
+  function drawSki(s) {
+    const camPx = s.cam * S;
+    wctx.save();                              // base snow, full scroll speed
+    wctx.translate(0, -(camPx % 64));
+    wctx.fillStyle = skiSnowPat;
+    wctx.fillRect(0, 0, W, H + 64);
+    wctx.restore();
+    const off = (camPx * 0.5) % H;            // speckle layer at half speed
+    wctx.drawImage(skiSpeck, 0, -off);
+    wctx.drawImage(skiSpeck, 0, H - off);
+    wctx.fillStyle = "rgba(90,110,140,.25)";  // side banks
+    wctx.fillRect(0, 0, 4, H);
+    wctx.fillRect(W - 4, 0, 4, H);
+    for (const [oid, ob] of obsMap) {
+      const sy = (ob[1] - s.cam) * S;
+      if (sy < -20) { obsMap.delete(oid); continue; }
+      if (sy > H + 20) continue;
+      if (ob[2] === 0) drawTree(ob[0] * S, sy); else drawRock(ob[0] * S, sy);
+    }
+    for (const [bx, by] of s.balls) {         // snowballs
+      const x = bx * S, y = (by - s.cam) * S;
+      wctx.fillStyle = "rgba(255,255,255,.5)";
+      wctx.fillRect(x - 1, y - 5, 2, 4);
+      wctx.fillStyle = "#fff";
+      wctx.beginPath(); wctx.arc(x, y, 2.5, 0, Math.PI * 2); wctx.fill();
+      wctx.strokeStyle = "#b8c6da"; wctx.lineWidth = 1; wctx.stroke();
+    }
+    for (const e of s.ents) {
+      if (e.alive) drawSkier(e);
+    }
+    drawAvalanche();
+  }
+
+  /* ---------------------------- planes helpers ---------------------------- */
+
+  function mkClouds(alpha, n, size) {
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = 70;
+    const c = cv.getContext("2d");
+    c.fillStyle = `rgba(255,225,200,${alpha})`;
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * W, y = 14 + Math.random() * 38;
+      for (let j = 0; j < 5; j++) {
+        c.beginPath();
+        c.arc(x + (j - 2) * size * 0.7, y + ((j % 2) - 0.5) * 4,
+              size - Math.abs(j - 2) * 3, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+    return cv;
+  }
+
+  function buildSkyLayers() {
+    skyBg = document.createElement("canvas");
+    skyBg.width = W; skyBg.height = H;
+    const c = skyBg.getContext("2d");
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#141b33");
+    g.addColorStop(0.55, "#3a2c4e");
+    g.addColorStop(1, "#8a4a2e");
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    const sg = c.createRadialGradient(360, 218, 4, 360, 218, 60);   // low sun
+    sg.addColorStop(0, "rgba(255,190,110,.9)");
+    sg.addColorStop(0.25, "rgba(255,160,80,.35)");
+    sg.addColorStop(1, "transparent");
+    c.fillStyle = sg;
+    c.fillRect(280, 150, 170, 120);
+    c.fillStyle = "#ffce8f";
+    c.beginPath(); c.arc(360, 218, 9, 0, Math.PI * 2); c.fill();
+    for (let i = 0; i < 40; i++) {
+      c.fillStyle = `rgba(255,240,220,${0.2 + Math.random() * 0.4})`;
+      c.fillRect((Math.random() * W) | 0, (Math.random() * H * 0.4) | 0, 1, 1);
+    }
+    c.fillStyle = "rgba(20,16,30,.75)";       // distant zeppelin
+    c.beginPath(); c.ellipse(96, 60, 26, 8, -0.05, 0, Math.PI * 2); c.fill();
+    c.fillRect(88, 66, 14, 5);
+    c.fillRect(120, 57, 6, 6);
+    cloudFar = mkClouds(0.10, 5, 10);
+    cloudNear = mkClouds(0.16, 4, 16);
+  }
+
+  function buildIslandLayer(islands) {
+    isleCv = document.createElement("canvas");
+    isleCv.width = W;
+    isleCv.height = H;
+    const c = isleCv.getContext("2d");
+    for (const [wx, wy, wr] of islands) {
+      const x = wx * S, y = wy * S, r = wr * S;
+      c.fillStyle = "#4a3628";                    // rocky body
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#5d4433";                    // strata speckles
+      for (let i = 0; i < 6; i++) {
+        c.fillRect(x - r + Math.random() * r * 1.6,
+                   y + r * 0.15 + Math.random() * r * 0.6, 3, 2);
+      }
+      c.fillStyle = "#3f8a4d";                    // grass dome
+      c.beginPath(); c.ellipse(x, y - r * 0.18, r * 0.98, r * 0.62, 0, Math.PI, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "#54a862";
+      c.beginPath(); c.ellipse(x, y - r * 0.26, r * 0.85, r * 0.45, 0, Math.PI, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "#79c184";                    // grass tufts
+      for (let i = 0; i < 5; i++) {
+        c.fillRect(x - r * 0.7 + Math.random() * r * 1.4,
+                   y - r * 0.5 + Math.random() * r * 0.25, 2, 1);
+      }
+      c.fillStyle = "#4a3628";                    // drifting crumbs below
+      c.fillRect(x - r * 0.25, y + r * 1.18, 3, 3);
+      c.fillRect(x + r * 0.4, y + r * 1.05, 2, 2);
+    }
+  }
+
+  function drawGusts(t) {
+    if (!arena || !arena.gusts) return;
+    for (const [wx, wy, wr, a100] of arena.gusts) {
+      const x = wx * S, y = wy * S, r = wr * S, ang = a100 / 100;
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      wctx.fillStyle = "rgba(160,220,255,.05)";
+      wctx.beginPath(); wctx.arc(x, y, r, 0, Math.PI * 2); wctx.fill();
+      wctx.strokeStyle = "rgba(190,235,255,.55)";
+      wctx.lineWidth = 1;
+      for (let i = 0; i < 7; i++) {               // streaks flow along the wind
+        const ph = (t * 0.00035 * (1 + (i % 3) * 0.25) + i * 0.143) % 1;
+        const off = (i / 7 - 0.5) * 2 * r * 0.8;
+        const along = (ph - 0.5) * 2 * r;
+        const px = x + ca * along - sa * off;
+        const py = y + sa * along + ca * off;
+        if (Math.hypot(px - x, py - y) > r) continue;
+        wctx.globalAlpha = 0.2 + 0.5 * Math.sin(ph * Math.PI);
+        wctx.beginPath();
+        wctx.moveTo(px - ca * 7, py - sa * 7);
+        wctx.lineTo(px, py);
+        wctx.stroke();
+      }
+      wctx.globalAlpha = 1;
+    }
+  }
+
+  function drawPlane(e, t) {
+    const m = meta.get(e.pid) || { color: "#888" };
+    wctx.save();
+    wctx.translate(e.x, e.y);
+    wctx.rotate(e.ang);
+    wctx.fillStyle = shade(m.color, 0.62);    // wings
+    wctx.fillRect(-2, -7, 5, 14);
+    wctx.fillStyle = m.color;                 // fuselage
+    wctx.fillRect(-7, -2.5, 14, 5);
+    wctx.fillStyle = "#e2b25a";               // brass nose
+    wctx.fillRect(6, -1.5, 2, 3);
+    wctx.fillStyle = shade(m.color, 0.5);     // tail
+    wctx.fillRect(-8, -4, 3, 8);
+    wctx.fillStyle = "rgba(255,255,255,.7)";  // cockpit glint
+    wctx.fillRect(0, -1, 2, 2);
+    wctx.strokeStyle = "rgba(240,240,255,.65)";
+    wctx.lineWidth = 1;
+    const pr = 4 * Math.abs(Math.sin(t / 25));  // spinning prop
+    wctx.beginPath(); wctx.moveTo(8.5, -pr); wctx.lineTo(8.5, pr); wctx.stroke();
+    wctx.restore();
+    if (e.hp === 1 && Math.random() < 0.35) { // smoking on the last heart
+      particles.push({ x: e.x - Math.cos(e.ang) * 8, y: e.y - Math.sin(e.ang) * 8,
+                       vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.5) * 12 - 6,
+                       life: 0.5 + Math.random() * 0.3, t: 0, size: 2,
+                       color: "rgba(120,120,130,.8)", grav: -14 });
+    }
+  }
+
+  function drawPlanes(s) {
+    const t = performance.now();
+    wctx.drawImage(skyBg, 0, 0);
+    const o1 = (t * 0.004) % W;               // far clouds drift (parallax)
+    wctx.drawImage(cloudFar, -o1, 52);
+    wctx.drawImage(cloudFar, W - o1, 52);
+    drawGusts(t);
+    if (isleCv) wctx.drawImage(isleCv, 0, 0);
+    const o2 = (t * 0.012) % W;               // near clouds pass over islands
+    wctx.drawImage(cloudNear, -o2, 150);
+    wctx.drawImage(cloudNear, W - o2, 150);
+    for (const [bx, by] of s.bullets) {       // tracers
+      const x = bx * S, y = by * S;
+      wctx.fillStyle = "rgba(255,212,59,.35)";
+      wctx.fillRect(x - 2, y - 2, 4, 4);
+      wctx.fillStyle = "#ffd43b";
+      wctx.fillRect(x - 1, y - 1, 2, 2);
+    }
+    for (const e of s.ents) {
+      if (!e.alive) continue;
+      if (e.inv && (((t / 90) | 0) % 2)) continue;   // hit blink
+      drawPlane(e, t);
+      // riding a gust: boost streaks behind the plane
+      for (const [gx, gy, gr] of arena.gusts || []) {
+        if (Math.hypot(e.x - gx * S, e.y - gy * S) < gr * S) {
+          wctx.strokeStyle = "rgba(190,235,255,.6)";
+          wctx.lineWidth = 1;
+          const ca = Math.cos(e.ang), sa = Math.sin(e.ang);
+          for (const o of [-3, 3]) {
+            wctx.beginPath();
+            wctx.moveTo(e.x - ca * 9 - sa * o, e.y - sa * 9 + ca * o);
+            wctx.lineTo(e.x - ca * 17 - sa * o, e.y - sa * 17 + ca * o);
+            wctx.stroke();
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  function drawHearts(ents) {
+    const sx = cssW / W, sy = cssH / H;
+    octx.font = "9px ui-monospace, Menlo, monospace";
+    octx.textAlign = "center";
+    octx.fillStyle = "#ff5a6e";
+    for (const e of ents) {
+      if (!e.alive || e.hp == null) continue;
+      octx.fillText("♥".repeat(e.hp), e.x * sx, (e.y + 13) * sy + 8);
+    }
+  }
+
   /* ------------------------------ round api ------------------------------ */
 
   function startRound(a, roster, playersMeta) {
@@ -163,6 +492,7 @@ const Renderer = (() => {
     fallers = [];
     shake = 0;
     cellMap = new Map();
+    obsMap = new Map();
     if (a.g === "cycles") {
       cellW = W / a.gw;
       cellH = H / a.gh;
@@ -171,6 +501,11 @@ const Renderer = (() => {
       trailCv.height = H;
       trailCtx = trailCv.getContext("2d");
       buildGridDots(a.gw, a.gh);
+    }
+    if (a.g === "ski" && !skiSnowPat) buildSkiLayers();
+    if (a.g === "planes") {
+      if (!skyBg) buildSkyLayers();
+      buildIslandLayer(a.islands || []);
     }
     if (!bg) buildBg();
     if (!floorPat) buildFloor();
@@ -190,6 +525,15 @@ const Renderer = (() => {
       const e = new Map();
       for (const row of m.heads) e.set(row[0], row.slice(1)); // [x,y,alive,dx,dy]
       snaps.push({ t: now, margin: m.margin || 0, e, cyc: true });
+    } else if (m.g === "ski") {
+      for (const [oid, x, y, k] of m.obs || []) obsMap.set(oid, [x, y, k]);
+      const e = new Map();
+      for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,tumble]
+      snaps.push({ t: now, ski: true, cam: m.cam, spd: m.spd, balls: m.balls || [], e });
+    } else if (m.g === "planes") {
+      const e = new Map();
+      for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,ang,hp,inv]
+      snaps.push({ t: now, pln: true, bullets: m.b || [], e });
     } else {
       const e = new Map();
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,r]
@@ -231,6 +575,18 @@ const Renderer = (() => {
     return e ? { x: e[0] * S, y: e[1] * S, r: (e[4] || 13) * S } : null;
   }
 
+  function worldPos(pid) {          // generic screen pos from the latest snap
+    const s = snaps[snaps.length - 1];
+    const e = s && s.e.get(pid);
+    return e ? { x: e[0] * S, y: e[1] * S } : null;
+  }
+
+  function skiPos(pid) {            // ski world y -> screen via the camera
+    const s = snaps[snaps.length - 1];
+    const e = s && s.ski && s.e.get(pid);
+    return e ? { x: e[0] * S, y: (e[1] - s.cam) * S } : null;
+  }
+
   function fx(events) {
     for (const ev of events) {
       const kind = ev[0];
@@ -253,6 +609,45 @@ const Renderer = (() => {
         clearCells(ev[1]);
       } else if (kind === "wall") {
         shake = Math.max(shake, 2);
+      } else if (kind === "bonk") {
+        const [, , x, sy] = ev;          // ski events carry screen-relative y
+        spark(x * S, sy * S, 10, ["#fff", "#8a6248", "#e6eef9"], 70);
+        shake = Math.max(shake, 3);
+      } else if (kind === "splat") {
+        const p = skiPos(ev[1]);
+        if (p) {
+          spark(p.x, p.y, 18, ["#fff", "#e6eef9", "#bcd0ea"], 95);
+          shake = Math.max(shake, 4);
+        }
+      } else if (kind === "wipe") {
+        const [, , x, sy] = ev;
+        spark(x * S, sy * S, 28, ["#fff", "#e6eef9"], 115);
+        shake = Math.max(shake, 7);
+      } else if (kind === "shoot") {
+        const p = worldPos(ev[1]);
+        if (p) spark(p.x, p.y, 2, ["#ffd43b"], 60);
+      } else if (kind === "hitp") {
+        const [, , x, y] = ev;
+        spark(x * S, y * S, 14, ["#ffd43b", "#ff8a5a", "#fff"], 100);
+        shake = Math.max(shake, 4);
+      } else if (kind === "clash") {
+        const [, x, y] = ev;
+        spark(x * S, y * S, 8, ["#e2b25a", "#fff"], 80);
+        shake = Math.max(shake, 2.5);
+      } else if (kind === "thud") {
+        const [, , x, y] = ev;
+        spark(x * S, y * S, 9, ["#5d4433", "#79c184", "#fff"], 75);
+        shake = Math.max(shake, 2.5);
+      } else if (kind === "puff") {
+        const [, x, y] = ev;
+        spark(x * S, y * S, 5, ["#ccc", "#fff"], 40);
+      } else if (kind === "down") {
+        const [, pid, x, y] = ev;
+        const m = meta.get(pid) || { color: "#888" };
+        spark(x * S, y * S, 34, [m.color, "#ffd43b", "#ff8a5a", "#666"], 125);
+        fallers.push({ x: x * S, y: y * S, vx: (Math.random() - 0.5) * 30, vy: 26,
+                       r: 6, color: m.color, rot: 0, vr: 9, t: 0, life: 1.1 });
+        shake = Math.max(shake, 7);
       } else if (kind === "fall") {
         const [, pid, x, y, vx, vy] = ev;
         const m = meta.get(pid) || { color: "#888", name: "?" };
@@ -307,6 +702,40 @@ const Renderer = (() => {
           y: (e0[1] + (e1[1] - e0[1]) * a + 0.5) * cellH,
           vx: e1[3], vy: e1[4],
           alive: e1[2] === 1, r: cellW * 0.8,
+        });
+      }
+      return out;
+    }
+    if (s1.ski) {
+      const cam = s0.ski ? s0.cam + (s1.cam - s0.cam) * a : s1.cam;
+      const out = { ski: true, cam, spd: s1.spd, balls: s1.balls, ents: [] };
+      for (const [pid, e1] of s1.e) {
+        const e0 = (s0.ski && s0.e.get(pid)) || e1;
+        const wx = e0[0] + (e1[0] - e0[0]) * a;
+        const wy = e0[1] + (e1[1] - e0[1]) * a;
+        out.ents.push({ pid, x: wx * S, y: (wy - cam) * S,
+                        vx: e1[0] - e0[0], alive: e1[2] === 1,
+                        cd: e1[3], tumble: e1[4], r: 6 });
+      }
+      return out;
+    }
+    if (s1.pln) {
+      const out = { pln: true, bullets: s1.bullets, ents: [] };
+      for (const [pid, e1] of s1.e) {
+        const e0 = (s0.pln && s0.e.get(pid)) || e1;
+        let x0 = e0[0], y0 = e0[1];
+        if (Math.abs(e1[0] - x0) > 480) x0 += e1[0] > x0 ? 960 : -960;  // wrap
+        if (Math.abs(e1[1] - y0) > 270) y0 += e1[1] > y0 ? 540 : -540;
+        const a0 = (e0[4] || 0) / 100, a1 = (e1[4] || 0) / 100;
+        let da = a1 - a0;
+        if (da > Math.PI) da -= 2 * Math.PI;
+        else if (da < -Math.PI) da += 2 * Math.PI;
+        out.ents.push({
+          pid,
+          x: (((x0 + (e1[0] - x0) * a) % 960) + 960) % 960 * S,
+          y: (((y0 + (e1[1] - y0) * a) % 540) + 540) % 540 * S,
+          ang: a0 + da * a,
+          alive: e1[2] === 1, cd: e1[3], hp: e1[5], inv: e1[6] === 1, r: 6,
         });
       }
       return out;
@@ -533,6 +962,10 @@ const Renderer = (() => {
     if (s) {
       if (s.cyc) {
         drawCycles(s);
+      } else if (s.ski) {
+        drawSki(s);
+      } else if (s.pln) {
+        drawPlanes(s);
       } else {
         drawRing(s.R);
         drawWind(s.wind);
@@ -540,12 +973,19 @@ const Renderer = (() => {
         const alive = s.ents.filter((e) => e.alive);
         alive.sort((a, b) => a.y - b.y);
         for (const e of alive) drawPlayer(e);
-        drawFallers(dt);
       }
+      drawFallers(dt);
       drawParticles(dt);
       drawNameTags(s.ents);
+      if (s.pln) drawHearts(s.ents);
     } else if (arena.g === "cycles") {
       drawCycles({ margin: 0, ents: [] });
+      drawParticles(dt);
+    } else if (arena.g === "ski") {
+      if (skiSnowPat) drawSki({ cam: 0, spd: 0, balls: [], ents: [] });
+      drawParticles(dt);
+    } else if (arena.g === "planes") {
+      if (skyBg) drawPlanes({ bullets: [], ents: [] });
       drawParticles(dt);
     } else {
       drawRing((arena.R0 || 232) * S);
