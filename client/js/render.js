@@ -188,11 +188,26 @@ const Renderer = (() => {
     for (const e of s.ents) {
       if (!e.alive) continue;
       const pm = meta.get(e.pid) || { color: "#888" };
-      wctx.globalAlpha = 0.3;
+      if (e.boosting) {                       // short speed-line trail
+        const spd = Math.hypot(e.vx, e.vy) || 1;
+        const dx = e.vx / spd, dy = e.vy / spd;
+        wctx.strokeStyle = "rgba(255,255,255,.6)";
+        wctx.lineWidth = 1;
+        for (let i = 1; i <= 3; i++) {
+          wctx.globalAlpha = 0.5 / i;
+          const bx = e.x - dx * cellW * i * 1.4, by = e.y - dy * cellH * i * 1.4;
+          wctx.beginPath();
+          wctx.moveTo(bx, by);
+          wctx.lineTo(bx - dx * cellW * 0.8, by - dy * cellH * 0.8);
+          wctx.stroke();
+        }
+      }
+      wctx.globalAlpha = e.boosting ? 0.45 : 0.3;
       wctx.fillStyle = pm.color;
-      wctx.fillRect(e.x - cellW, e.y - cellH, cellW * 2, cellH * 2);   // glow
+      const gr = e.boosting ? 1.3 : 1;
+      wctx.fillRect(e.x - cellW * gr, e.y - cellH * gr, cellW * 2 * gr, cellH * 2 * gr);   // glow
       wctx.globalAlpha = 1;
-      wctx.fillStyle = pm.color;
+      wctx.fillStyle = e.boosting ? mix(pm.color, "#ffffff", 0.55) : pm.color;
       wctx.fillRect(e.x - cellW / 2, e.y - cellH / 2, cellW, cellH);
       wctx.fillStyle = "#fff";
       wctx.fillRect(e.x - 1, e.y - 1, 2, 2);
@@ -600,7 +615,14 @@ const Renderer = (() => {
         paintCell(x, y, pid);
       }
       const e = new Map();
-      for (const row of m.heads) e.set(row[0], row.slice(1)); // [x,y,alive,dx,dy]
+      for (const row of m.heads) {
+        // new: [pid,gx,gy,alive,boost01,dx,dy,boosting] (8 fields)
+        // legacy: [pid,gx,gy,alive,dx,dy] (6 fields) — tolerate both
+        const [pid, gx, gy, alive, f4, f5, f6, f7] = row;
+        e.set(pid, row.length >= 8
+          ? [gx, gy, alive, f5, f6, f4, f7]     // -> [x,y,alive,dx,dy,boost,boosting]
+          : [gx, gy, alive, f4, f5, 0, 0]);
+      }
       snaps.push({ t: now, margin: m.margin || 0, e, cyc: true });
     } else if (m.g === "ski") {
       for (const [oid, x, y, k] of m.obs || []) obsMap.set(oid, [x, y, k]);
@@ -666,6 +688,18 @@ const Renderer = (() => {
     return e ? { x: e[0] * S, y: (e[1] - s.cam) * S } : null;
   }
 
+  function cyclePos(pid) {          // cycles head screen pos (grid -> buffer px)
+    const s = snaps[snaps.length - 1];
+    const e = s && s.cyc && s.e.get(pid);
+    return e ? { x: (e[0] + 0.5) * cellW, y: (e[1] + 0.5) * cellH } : null;
+  }
+
+  function planeHeading(pid) {      // current heading (radians) from the latest snap
+    const s = snaps[snaps.length - 1];
+    const e = s && s.pln && s.e.get(pid);
+    return e ? (e[4] || 0) / 100 : null;
+  }
+
   function fx(events) {
     for (const ev of events) {
       const kind = ev[0];
@@ -688,6 +722,12 @@ const Renderer = (() => {
         clearCells(ev[1]);
       } else if (kind === "wall") {
         shake = Math.max(shake, 2);
+      } else if (kind === "boost") {
+        const pid = ev[1];
+        const p = cyclePos(pid);
+        const m = meta.get(pid);
+        if (p) spark(p.x, p.y, 10, [m ? m.color : "#fff", "#fff"], 70);
+        shake = Math.max(shake, 1.5);
       } else if (kind === "bonk") {
         const [, , x, sy] = ev;          // ski events carry screen-relative y
         spark(x * S, sy * S, 10, ["#fff", "#8a6248", "#e6eef9"], 70);
@@ -763,14 +803,18 @@ const Renderer = (() => {
 
   function sample() {
     if (!snaps.length) return null;
-    const delay = Math.min(260, Math.max(80, snapGap * 1.6));
-    const rt = performance.now() - delay;
+    const delay = Math.min(200, Math.max(50, snapGap * 1.25 + 15));
+    let rt = performance.now() - delay;
     let s0 = snaps[0], s1 = snaps[snaps.length - 1];
     for (let i = snaps.length - 1; i > 0; i--) {
       if (snaps[i - 1].t <= rt) { s0 = snaps[i - 1]; s1 = snaps[i]; break; }
     }
+    // buffer ran dry (no fresher snapshot yet): extrapolate briefly along the
+    // last known velocity instead of freezing on s1.
+    if (rt > s1.t) rt = Math.min(rt, s1.t + 120);
     const span = s1.t - s0.t;
-    const a = span > 0 ? Math.min(1, Math.max(0, (rt - s0.t) / span)) : 1;
+    const a = span > 16 ? Math.max(0, (rt - s0.t) / span)
+                        : Math.max(0, Math.min(1, span > 0 ? (rt - s0.t) / span : 1));
     if (s1.cyc) {
       const out = { margin: s1.margin, ents: [], cyc: true };
       for (const [pid, e1] of s1.e) {
@@ -781,6 +825,7 @@ const Renderer = (() => {
           y: (e0[1] + (e1[1] - e0[1]) * a + 0.5) * cellH,
           vx: e1[3], vy: e1[4],
           alive: e1[2] === 1, r: cellW * 0.8,
+          boost: e1[5] || 0, boosting: e1[6] === 1,
         });
       }
       return out;

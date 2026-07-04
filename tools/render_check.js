@@ -42,13 +42,19 @@ console.log("sumo draw path OK");
 
 // --- cycles ---
 Renderer.startRound({ g: "cycles", w: 960, h: 540, gw: 96, gh: 54, wrap: false }, [1, 2], meta);
-Renderer.addSnapshot({ t: "s", g: "cycles", margin: 0, heads: [[1, 30, 27, 1, 1, 0], [2, 60, 27, 1, -1, 0]],
+// new 8-field heads: [pid,gx,gy,alive,boost01,dx,dy,boosting]
+Renderer.addSnapshot({ t: "s", g: "cycles", margin: 0,
+                       heads: [[1, 30, 27, 1, 1, 1, 0, 1], [2, 60, 27, 1, 0, -1, 0, 0]],
                        cells: [[30, 27, 1], [60, 27, 2]] });
 T += 66;
-Renderer.addSnapshot({ t: "s", g: "cycles", margin: 2, heads: [[1, 31, 27, 1, 1, 0], [2, 59, 27, 0, -1, 0]],
+Renderer.addSnapshot({ t: "s", g: "cycles", margin: 2,
+                       heads: [[1, 31, 27, 1, 1, 1, 0, 1], [2, 59, 27, 0, 0, -1, 0, 0]],
                        cells: [[31, 27, 1], [59, 27, 2]] });
-Renderer.fx([["die", 2, 59, 27], ["wall", 2], ["clear", 2]]);
+Renderer.fx([["die", 2, 59, 27], ["wall", 2], ["clear", 2], ["boost", 1]]);
 frames(30);
+// legacy 6-field heads (pre-boost servers) must still parse without crashing
+Renderer.addSnapshot({ t: "s", g: "cycles", margin: 2, heads: [[1, 32, 27, 1, 1, 0]], cells: [[32, 27, 1]] });
+frames(5);
 console.log("cycles draw path OK");
 
 // --- ski ---
