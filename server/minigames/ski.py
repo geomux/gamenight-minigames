@@ -79,7 +79,8 @@ class AvalancheRun(MiniGame):
         self._next_oid = 1
         self._new_obs = []        # deltas since last snapshot
         self._spawn_y = 620.0
-        self.balls = []           # {x, y, vx, vy, life, owner}
+        self.balls = []           # {id, x, y, vx, vy, life, owner}
+        self._next_bid = 1
         self._gen_terrain()
 
     # ---------------------------------------------------------------- terrain
@@ -148,10 +149,12 @@ class AvalancheRun(MiniGame):
                 if dx == 0 and dy == 0:
                     dy = 1.0                                 # default: chuck it downhill
                 mag = math.hypot(dx, dy)
-                self.balls.append({"x": e["x"], "y": e["y"], "owner": pid,
+                self.balls.append({"id": self._next_bid, "x": e["x"], "y": e["y"],
+                                   "owner": pid,
                                    "vx": dx / mag * BALL_SPEED,
                                    "vy": dy / mag * BALL_SPEED + self.spd,
                                    "life": BALL_LIFE})
+                self._next_bid += 1
                 e["cd"] = p["ball_cd"]
                 events.append(["throw", pid])
             e["prev_a"] = k["a"]
@@ -238,7 +241,8 @@ class AvalancheRun(MiniGame):
                        round(e["tumble"] / TUMBLE_SECS, 2)]
                       for pid, e in self.ent.items()],
                 "obs": obs,
-                "balls": [[round(b["x"], 1), round(b["y"], 1)] for b in self.balls]}
+                "balls": [[b["id"], round(b["x"], 1), round(b["y"], 1),
+                           round(b["vx"]), round(b["vy"])] for b in self.balls]}
 
     def setup(self):
         out = {"g": self.ID, "w": WORLD_W, "h": WORLD_H}

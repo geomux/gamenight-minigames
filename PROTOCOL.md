@@ -51,20 +51,26 @@ action, hence no charge and no meter.)
 cell). Clients accumulate them locally. `margin` = closing-wall depth in
 cells.
 
-**Avalanche Run** — `{"t":"s","g":"ski","cam":y,"spd":v,"e":[[pid,x,y,alive,ball01,tumble01]…],"obs":[[id,x,y,type]…],"balls":[[x,y]…]}`
+**Avalanche Run** — `{"t":"s","g":"ski","cam":y,"spd":v,"e":[[pid,x,y,alive,ball01,tumble01]…],"obs":[[id,x,y,type]…],"balls":[[bid,x,y,vx,vy]…]}`
 `cam` = world-y of the top of the screen (shared auto-scrolling camera —
 clients offset all world coords by it, and scroll their parallax layers from
 it). `obs` are **deltas** like cycles' cells: each obstacle (0 = tree,
 1 = rock) is sent exactly once; clients cull anything behind the camera.
-Entity `y` is absolute world-y.
+Entity `y` is absolute world-y. `balls` carry a per-round `bid` plus
+`vx`/`vy` (world px/s, rounded ints) so clients dead-reckon smooth 60fps
+flight from the last snapshot instead of snapping to a new raw position
+every update.
 
-**Aces High** — `{"t":"s","g":"planes","e":[[pid,x,y,alive,fire01,ang,hp,inv]…],"b":[[x,y]…]}`
+**Aces High** — `{"t":"s","g":"planes","e":[[pid,x,y,alive,fire01,ang,hp,inv]…],"b":[[bid,x,y,vx,vy]…]}`
 `ang` = heading in centiradians (divide by 100). `hp` = hearts left, `inv` =
-1 during post-hit blink. `b` = live bullets. The world wraps at 960×540 —
-clients interpolate wrap-aware (shortest path across edges). The arena
-payload carries the static geometry: `"islands":[[x,y,r]…]` (solid — planes
-bounce, bullets stop) and `"gusts":[[x,y,r,ang100]…]` (directional shove
-zones; clients animate them and detect boost locally, zero extra wire cost).
+1 during post-hit blink. `b` = live bullets, each `[bid,x,y,vx,vy]` (`vx`/`vy`
+world px/s, rounded ints) — clients dead-reckon position from the last
+snapshot instead of interpolating raw points, so bullets fly straight and
+smooth between the ~15-20Hz updates. The world wraps at 960×540 — clients
+interpolate wrap-aware (shortest path across edges). The arena payload
+carries the static geometry: `"islands":[[x,y,r]…]` (solid — planes bounce,
+bullets stop) and `"gusts":[[x,y,r,ang100]…]` (directional shove zones;
+clients animate them and detect boost locally, zero extra wire cost).
 
 ### Fx events
 

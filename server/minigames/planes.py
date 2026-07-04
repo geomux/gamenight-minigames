@@ -73,7 +73,8 @@ class AcesHigh(MiniGame):
                 "hp": self.p["lives"], "alive": True,
                 "keys": _NO_KEYS.copy(), "cd": 0.0, "inv": 0.0,
             }
-        self.bullets = []        # {x,y,vx,vy,life,owner}
+        self.bullets = []        # {id,x,y,vx,vy,life,owner}
+        self._next_bid = 1
         self.t = 0.0
         self.order = []
         self._over = False
@@ -161,12 +162,14 @@ class AcesHigh(MiniGame):
                 spread = self.rng.uniform(-0.04, 0.04)
                 a = e["a"] + spread
                 self.bullets.append({
+                    "id": self._next_bid,
                     "x": e["x"] + math.cos(e["a"]) * (PLANE_R + 4),
                     "y": e["y"] + math.sin(e["a"]) * (PLANE_R + 4),
                     "vx": math.cos(a) * p["bullet_v"] + math.cos(e["a"]) * spd * 0.4,
                     "vy": math.sin(a) * p["bullet_v"] + math.sin(e["a"]) * spd * 0.4,
                     "life": BULLET_LIFE, "owner": pid,
                 })
+                self._next_bid += 1
                 e["cd"] = p["fire_cd"]
                 events.append(["shoot", pid])
 
@@ -256,7 +259,8 @@ class AcesHigh(MiniGame):
                        round(e["a"] * 100), e["hp"],
                        1 if e["inv"] > 0 else 0]
                       for pid, e in self.ent.items()],
-                "b": [[round(b["x"]), round(b["y"])] for b in self.bullets]}
+                "b": [[b["id"], round(b["x"]), round(b["y"]),
+                       round(b["vx"]), round(b["vy"])] for b in self.bullets]}
 
     def setup(self):
         return {"g": self.ID, "w": WORLD_W, "h": WORLD_H,
