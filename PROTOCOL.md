@@ -45,11 +45,13 @@ action, hence no charge and no meter.)
 **Sumo** — `{"t":"s","g":"sumo","R":ringRadius,"e":[[pid,x,y,alive,dash01,r]…],"wind"?:[dx,dy]}`
 `r` = body radius.
 
-**Light Cycles** — `{"t":"s","g":"cycles","heads":[[pid,gx,gy,alive,dx,dy]…],"cells":[[gx,gy,pid]…],"margin":m}`
-`cells` are **deltas**: only cells claimed since the previous snapshot (a
-`full` snapshot — countdown preview or late join — carries every occupied
-cell). Clients accumulate them locally. `margin` = closing-wall depth in
-cells.
+**Light Cycles** — `{"t":"s","g":"cycles","heads":[[pid,gx,gy,alive,boost01,dx,dy,boosting]…],"cells":[[gx,gy,pid]…],"margin":m}`
+`boost01` = 0–1 boost meter (1 = full charge; stays 0 if the `boost`
+setting is off). `boosting` = 1 while a boost is actively being applied
+that tick. `cells` are **deltas**: only cells claimed since the previous
+snapshot (a `full` snapshot — countdown preview or late join — carries
+every occupied cell). Clients accumulate them locally. `margin` =
+closing-wall depth in cells.
 
 **Avalanche Run** — `{"t":"s","g":"ski","cam":y,"spd":v,"e":[[pid,x,y,alive,ball01,tumble01]…],"obs":[[id,x,y,type]…],"balls":[[bid,x,y,vx,vy]…]}`
 `cam` = world-y of the top of the screen (shared auto-scrolling camera —
@@ -82,6 +84,7 @@ clients animate them and detect boost locally, zero extra wire cost).
 | die | `["die",pid,gx,gy]` | Cycle crashed (burst at grid cell) |
 | clear | `["clear",pid]` | Dead player's trail vanishes (trails=vanish) |
 | wall | `["wall",margin]` | Closing walls advanced one cell |
+| boost | `["boost",pid]` | Light Cycle boost activated |
 | throw | `["throw",pid]` | Snowball thrown |
 | bonk | `["bonk",pid,x,screenY]` | Skier hit a tree/rock (y is screen-relative) |
 | splat | `["splat",victim,thrower]` | Snowball connected |
