@@ -51,8 +51,8 @@ class AcesHigh(MiniGame):
     def __init__(self, roster, settings, rng):
         super().__init__(roster, settings, rng)
         s = settings
-        guns = {"pea shooter": (1.1, 380.0), "normal": (0.8, 460.0),
-                "blaster": (0.5, 540.0)}[s.get("guns", "normal")]
+        guns = {"pea shooter": (1.1, 400.0), "normal": (0.8, 480.0),
+                "blaster": (0.5, 560.0)}[s.get("guns", "normal")]
         self.p = {
             "speed": {"chill": 170.0, "normal": 210.0, "turbo": 260.0}[s.get("speed", "normal")],
             "turn": {"normal": 3.2, "tight": 4.4}[s.get("turn", "normal")],
@@ -159,7 +159,7 @@ class AcesHigh(MiniGame):
             e["cd"] = max(0.0, e["cd"] - dt)
             e["inv"] = max(0.0, e["inv"] - dt)
             if k["a"] and e["cd"] <= 0:          # hold to auto-fire
-                spread = self.rng.uniform(-0.04, 0.04)
+                spread = self.rng.uniform(-0.03, 0.03)
                 a = e["a"] + spread
                 self.bullets.append({
                     "id": self._next_bid,
