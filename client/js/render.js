@@ -296,6 +296,14 @@ const Renderer = (() => {
         const a = t + i * 2.09;
         wctx.fillRect(x + Math.cos(a) * 9 - 1, y - 8 + Math.sin(a) * 3, 2, 2);
       }
+    } else if (Math.abs(e.vx) > 10 && Math.random() < 0.5) {   // carving hard: kick up spray
+      const dir = e.vx > 0 ? -1 : 1;
+      particles.push({
+        x: x + dir * 4, y: y + 6,
+        vx: dir * (20 + Math.random() * 25), vy: 15 + Math.random() * 20,
+        life: 0.22 + Math.random() * 0.14, t: 0, size: 1,
+        color: Math.random() < 0.5 ? "#fff" : "#dfe9f7", grav: 50,
+      });
     }
   }
 
@@ -476,11 +484,12 @@ const Renderer = (() => {
 
   function drawPlane(e, t) {
     const m = meta.get(e.pid) || { color: "#888" };
+    const bank = Math.max(-1, Math.min(1, (e.turn || 0) * 6));  // banking suggestion from turn rate
     wctx.save();
     wctx.translate(e.x, e.y);
     wctx.rotate(e.ang);
-    wctx.fillStyle = shade(m.color, 0.62);    // wings
-    wctx.fillRect(-2, -7, 5, 14);
+    wctx.fillStyle = shade(m.color, 0.62);    // wings (foreshorten + shift into the bank)
+    wctx.fillRect(-2, -7 + bank * 2.5, 5, 14 - Math.abs(bank) * 4);
     wctx.fillStyle = m.color;                 // fuselage
     wctx.fillRect(-7, -2.5, 14, 5);
     wctx.fillStyle = "#e2b25a";               // brass nose
@@ -744,7 +753,11 @@ const Renderer = (() => {
         shake = Math.max(shake, 7);
       } else if (kind === "shoot") {
         const p = worldPos(ev[1]);
-        if (p) spark(p.x, p.y, 2, ["#ffd43b"], 60);
+        if (p) {
+          const ang = planeHeading(ev[1]);
+          const nx = ang != null ? Math.cos(ang) : 0, ny = ang != null ? Math.sin(ang) : 0;
+          spark(p.x + nx * 8, p.y + ny * 8, 5, ["#ffd43b", "#fff", "#ffb347"], 85);
+        }
       } else if (kind === "hitp") {
         const [, , x, y] = ev;
         spark(x * S, y * S, 14, ["#ffd43b", "#ff8a5a", "#fff"], 100);
@@ -858,7 +871,7 @@ const Renderer = (() => {
           pid,
           x: (((x0 + (e1[0] - x0) * a) % 960) + 960) % 960 * S,
           y: (((y0 + (e1[1] - y0) * a) % 540) + 540) % 540 * S,
-          ang: a0 + da * a,
+          ang: a0 + da * a, turn: da,
           alive: e1[2] === 1, cd: e1[3], hp: e1[5], inv: e1[6] === 1, r: 6,
         });
       }
