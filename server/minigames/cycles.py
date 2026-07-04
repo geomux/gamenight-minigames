@@ -8,6 +8,7 @@ no matter how long the round runs.
 """
 
 import math
+from collections import deque
 
 from .base import MiniGame, BOT_SETTINGS, WORLD_W, WORLD_H
 
@@ -87,7 +88,7 @@ class LightCycles(MiniGame):
             while self.grid[y * GW + x]:     # nudge off an occupied spawn
                 x = (x + 1) % GW
             self.heads[pl["pid"]] = {"x": x, "y": y, "dir": d, "alive": True,
-                                     "keys": {},
+                                     "keys": {}, "turnq": deque(maxlen=2),
                                      "boost": 1.0 if self.boost_enabled else 0.0,
                                      "boosting": False, "boost_parity": 0}
             self._claim(x, y, pl["pid"])
@@ -108,6 +109,13 @@ class LightCycles(MiniGame):
     def on_input(self, pid, keys):
         h = self.heads.get(pid)
         if h and h["alive"]:
+            # a quick tap can be pressed *and released* between two grid
+            # steps (steps are 105-140ms apart, way slower than the network);
+            # queue newly-pressed direction keys so _step() still sees them.
+            prev = h["keys"]
+            for key in TURN_ORDER:
+                if keys.get(key) and not prev.get(key):
+                    h["turnq"].append(key)
             h["keys"] = keys
 
     # ------------------------------------------------------------------ tick
@@ -164,23 +172,34 @@ class LightCycles(MiniGame):
     def _step(self, events):
         alive = [(pid, h) for pid, h in self.heads.items() if h["alive"]]
 
-        # turns: a held perpendicular key turns you at the next cell
+        # turns: drain queued taps first (fixes taps lost between steps —
+        # see on_input), then fall back to whatever's currently held.
         for pid, h in alive:
             cur = DIRS[h["dir"]]
-            for key in TURN_ORDER:
-                held = h["keys"].get(key)
-                if not held:
-                    continue
-                k = key
-                if self.reverse:
-                    k = _REV[k]
+            new_dir = None
+            q = h["turnq"]
+            while q:
+                key = q.popleft()
+                k = _REV[key] if self.reverse else key
                 nd = DIRS[k]
-                if nd[0] == -cur[0] and nd[1] == -cur[1]:   # no 180s
-                    continue
-                if nd == cur:
-                    continue
-                h["dir"] = k
+                if nd == cur or (nd[0] == -cur[0] and nd[1] == -cur[1]):
+                    continue        # no-op / illegal 180: discard, try next
+                new_dir = k
                 break
+            if new_dir is None:
+                for key in TURN_ORDER:
+                    if not h["keys"].get(key):
+                        continue
+                    k = _REV[key] if self.reverse else key
+                    nd = DIRS[k]
+                    if nd[0] == -cur[0] and nd[1] == -cur[1]:   # no 180s
+                        continue
+                    if nd == cur:
+                        continue
+                    new_dir = k
+                    break
+            if new_dir is not None:
+                h["dir"] = new_dir
 
         self._advance(alive, events)
         if self._over:
