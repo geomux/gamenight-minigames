@@ -31,8 +31,8 @@ DEFAULTS = {
     "host_password": "",     # "" -> random one is generated and printed
     "join_password": "",     # "" -> anyone with the URL can join
     "max_players": 12,
-    "tick_rate": 30,
-    "snapshot_rate": 15,
+    "tick_rate": 60,
+    "snapshot_rate": 20,     # tick_rate/snapshot_rate must divide cleanly
 }
 
 
