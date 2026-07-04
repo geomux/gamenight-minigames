@@ -55,11 +55,13 @@ console.log("cycles draw path OK");
 Renderer.startRound({ g: "ski", w: 960, h: 540, action: "SNOWBALL" }, [1, 2], meta);
 Renderer.addSnapshot({ t: "s", g: "ski", cam: 0, spd: 150,
                        e: [[1, 300, 200, 1, 1, 0], [2, 600, 220, 1, 0.4, 0]],
-                       obs: [[1, 400, 700, 0], [2, 500, 820, 1]], balls: [[310, 260]] });
+                       obs: [[1, 400, 700, 0], [2, 500, 820, 1]],
+                       balls: [[1, 310, 260, 0, 380], [2, 400, 240, -50, 300]] });
 T += 66;
 Renderer.addSnapshot({ t: "s", g: "ski", cam: 12, spd: 152,
                        e: [[1, 305, 212, 1, 1, 0.8], [2, 600, 230, 0, 0.4, 0]],
-                       obs: [[3, 200, 900, 0]], balls: [] });
+                       obs: [[3, 200, 900, 0]],
+                       balls: [[1, 316, 285, 0, 380], [3, 500, 250, 40, 320]] });  // id 2 gone, id 3 new
 Renderer.fx([["throw", 1], ["bonk", 1, 305, 200], ["splat", 1, 2], ["wipe", 2, 600, 30]]);
 frames(30);
 console.log("ski draw path OK");
@@ -70,11 +72,11 @@ Renderer.startRound({ g: "planes", w: 960, h: 540, lives: 3, action: "FIRE",
                       gusts: [[700, 400, 55, 120]] }, [1, 2], meta);
 Renderer.addSnapshot({ t: "s", g: "planes",
                        e: [[1, 100, 100, 1, 1, 0, 3, 0], [2, 900, 500, 1, 0.5, 314, 1, 1]],
-                       b: [[400, 300], [410, 300]] });
+                       b: [[1, 400, 300, 460, 0], [2, 410, 300, 460, 0]] });
 T += 66;
 Renderer.addSnapshot({ t: "s", g: "planes",
                        e: [[1, 950, 110, 1, 1, 620, 3, 0], [2, 20, 490, 0, 0.5, 300, 0, 0]],
-                       b: [[420, 300]] });   // wrap + angle-wrap interp exercised
+                       b: [[1, 420, 300, 460, 0], [3, 100, 100, -300, 200]] });   // id 2 gone, id 3 new; wrap + angle-wrap interp exercised
 Renderer.fx([["shoot", 1], ["hitp", 2, 20, 490], ["clash", 400, 300],
              ["thud", 1, 440, 270], ["puff", 452, 265], ["down", 2, 20, 490]]);
 frames(30);

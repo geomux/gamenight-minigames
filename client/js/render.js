@@ -41,10 +41,12 @@ const Renderer = (() => {
   // avalanche-run state
   let obsMap = new Map();          // id -> [x, y, type]  (world coords)
   let skiSnowPat = null, skiSpeck = null;
+  let skiBalls = new Map();        // bid -> {x,y,vx,vy,t} dead-reckoning registry
 
   // aces-high state
   let skyBg = null, cloudFar = null, cloudNear = null;
   let isleCv = null;               // cached island layer for this round
+  let planeBullets = new Map();    // bid -> {x,y,vx,vy,t} dead-reckoning registry
 
   /* ------------------------------ helpers ------------------------------ */
 
@@ -54,6 +56,44 @@ const Renderer = (() => {
     const g = Math.max(0, Math.min(255, ((n >> 8) & 255) * f));
     const b = Math.max(0, Math.min(255, (n & 255) * f));
     return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
+  function mix(hex, hex2, t) {
+    const n1 = parseInt(hex.slice(1), 16), n2 = parseInt(hex2.slice(1), 16);
+    const r = ((n1 >> 16) & 255) * (1 - t) + ((n2 >> 16) & 255) * t;
+    const g = ((n1 >> 8) & 255) * (1 - t) + ((n2 >> 8) & 255) * t;
+    const b = (n1 & 255) * (1 - t) + (n2 & 255) * t;
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
+  /* ------------------------ projectile dead-reckoning ------------------------
+     Bullets/snowballs fly in perfect straight lines, so instead of the
+     buffered snapshot-to-snapshot interpolation used for players (which
+     trades latency for smoothing over *unknown* future input), each is
+     tracked by id and extrapolated from its last-known velocity every
+     frame: zero added latency, exact motion, no more teleport-on-snapshot. */
+
+  function upsertProjectiles(reg, rows) {
+    const seen = new Set();
+    const t = performance.now();
+    for (const row of rows) {
+      const [id, x, y, vx, vy] = row;
+      seen.add(id);
+      reg.set(id, { x, y, vx, vy, t });
+    }
+    for (const id of [...reg.keys()]) {
+      if (!seen.has(id)) reg.delete(id);
+    }
+  }
+
+  function liveProjectiles(reg, capMs = 150) {
+    const now = performance.now();
+    const out = [];
+    for (const p of reg.values()) {
+      const dt = Math.min(capMs, Math.max(0, now - p.t)) / 1000;
+      out.push({ x: p.x + p.vx * dt, y: p.y + p.vy * dt, vx: p.vx, vy: p.vy });
+    }
+    return out;
   }
 
   function buildBg() {
@@ -281,8 +321,8 @@ const Renderer = (() => {
       if (sy > H + 20) continue;
       if (ob[2] === 0) drawTree(ob[0] * S, sy); else drawRock(ob[0] * S, sy);
     }
-    for (const [bx, by] of s.balls) {         // snowballs
-      const x = bx * S, y = (by - s.cam) * S;
+    for (const b of liveProjectiles(skiBalls)) {   // snowballs, dead-reckoned
+      const x = b.x * S, y = (b.y - s.cam) * S;
       wctx.fillStyle = "rgba(255,255,255,.5)";
       wctx.fillRect(x - 1, y - 5, 2, 4);
       wctx.fillStyle = "#fff";
@@ -440,8 +480,9 @@ const Renderer = (() => {
     const o2 = (t * 0.012) % W;               // near clouds pass over islands
     wctx.drawImage(cloudNear, -o2, 150);
     wctx.drawImage(cloudNear, W - o2, 150);
-    for (const [bx, by] of s.bullets) {       // tracers
-      const x = bx * S, y = by * S;
+    for (const b of liveProjectiles(planeBullets)) {   // tracers, dead-reckoned
+      const x = (((b.x % 960) + 960) % 960) * S;
+      const y = (((b.y % 540) + 540) % 540) * S;
       wctx.fillStyle = "rgba(255,212,59,.35)";
       wctx.fillRect(x - 2, y - 2, 4, 4);
       wctx.fillStyle = "#ffd43b";
@@ -493,6 +534,8 @@ const Renderer = (() => {
     shake = 0;
     cellMap = new Map();
     obsMap = new Map();
+    skiBalls = new Map();
+    planeBullets = new Map();
     if (a.g === "cycles") {
       cellW = W / a.gw;
       cellH = H / a.gh;
@@ -529,11 +572,13 @@ const Renderer = (() => {
       for (const [oid, x, y, k] of m.obs || []) obsMap.set(oid, [x, y, k]);
       const e = new Map();
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,tumble]
-      snaps.push({ t: now, ski: true, cam: m.cam, spd: m.spd, balls: m.balls || [], e });
+      upsertProjectiles(skiBalls, m.balls || []);          // [bid,x,y,vx,vy]
+      snaps.push({ t: now, ski: true, cam: m.cam, spd: m.spd, e });
     } else if (m.g === "planes") {
       const e = new Map();
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,ang,hp,inv]
-      snaps.push({ t: now, pln: true, bullets: m.b || [], e });
+      upsertProjectiles(planeBullets, m.b || []);          // [bid,x,y,vx,vy]
+      snaps.push({ t: now, pln: true, e });
     } else {
       const e = new Map();
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,r]
@@ -708,7 +753,7 @@ const Renderer = (() => {
     }
     if (s1.ski) {
       const cam = s0.ski ? s0.cam + (s1.cam - s0.cam) * a : s1.cam;
-      const out = { ski: true, cam, spd: s1.spd, balls: s1.balls, ents: [] };
+      const out = { ski: true, cam, spd: s1.spd, ents: [] };
       for (const [pid, e1] of s1.e) {
         const e0 = (s0.ski && s0.e.get(pid)) || e1;
         const wx = e0[0] + (e1[0] - e0[0]) * a;
@@ -720,7 +765,7 @@ const Renderer = (() => {
       return out;
     }
     if (s1.pln) {
-      const out = { pln: true, bullets: s1.bullets, ents: [] };
+      const out = { pln: true, ents: [] };
       for (const [pid, e1] of s1.e) {
         const e0 = (s0.pln && s0.e.get(pid)) || e1;
         let x0 = e0[0], y0 = e0[1];
@@ -982,10 +1027,10 @@ const Renderer = (() => {
       drawCycles({ margin: 0, ents: [] });
       drawParticles(dt);
     } else if (arena.g === "ski") {
-      if (skiSnowPat) drawSki({ cam: 0, spd: 0, balls: [], ents: [] });
+      if (skiSnowPat) drawSki({ cam: 0, spd: 0, ents: [] });
       drawParticles(dt);
     } else if (arena.g === "planes") {
-      if (skyBg) drawPlanes({ bullets: [], ents: [] });
+      if (skyBg) drawPlanes({ ents: [] });
       drawParticles(dt);
     } else {
       drawRing((arena.R0 || 232) * S);
