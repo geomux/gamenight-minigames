@@ -16,6 +16,7 @@ R0 = 232.0          # starting ring radius
 R_MIN = 26.0        # radius the ring shrinks down to
 GRACE = 5.0         # seconds before shrinking starts
 DASH_WINDOW = 0.35  # seconds after a dash during which bumps hit harder
+WIND_DRIFT = 0.7 / math.sqrt(30.0)  # tuned at a 30Hz tick; see tick()
 
 
 class SumoRing(MiniGame):
@@ -90,7 +91,7 @@ class SumoRing(MiniGame):
             self.ent[pl["pid"]] = {
                 "x": CX + d * math.cos(ang), "y": CY + d * math.sin(ang),
                 "vx": 0.0, "vy": 0.0, "r": r, "alive": True,
-                "keys": _NO_KEYS.copy(), "prev_a": False,
+                "keys": _NO_KEYS.copy(), "dash_req": False,
                 "cd": 0.0, "dash_t": 99.0,  # time since last dash
             }
 
@@ -99,6 +100,7 @@ class SumoRing(MiniGame):
         self.order = []            # fall order: list of tie-groups, earliest first
         self._wind_ang = rng.uniform(0, 2 * math.pi)
         self._bot_state = {}       # pid -> wander phase etc.
+        self._bot_dt = 1.0 / 30.0  # last tick dt; bot rates were tuned at 30Hz
         self._over = False
 
     # ------------------------------------------------------------------ setup
@@ -116,6 +118,13 @@ class SumoRing(MiniGame):
     def on_input(self, pid, keys):
         e = self.ent.get(pid)
         if e and e["alive"]:
+            # latch the rising edge of the action key here, not in tick():
+            # a quick tap whose press AND release both arrive between two
+            # ticks would otherwise never be seen by the tick-time sampler
+            # (same failure class as the cycles turn-loss bug; rare at 60Hz
+            # ticks but very real at lower --tick-rate settings).
+            if keys.get("a") and not e["keys"].get("a"):
+                e["dash_req"] = True
             e["keys"] = keys
 
     # ------------------------------------------------------------------- tick
@@ -125,14 +134,20 @@ class SumoRing(MiniGame):
             return
         p = self.p
         self.t += dt
+        self._bot_dt = dt   # keeps bot_input's per-second rates tick-rate-true
 
         # ring radius
         if p["shrink_end"] > 0 and self.t > GRACE:
             frac = min(1.0, (self.t - GRACE) / max(0.1, p["shrink_end"] - GRACE))
             self.R = R0 + (R_MIN - R0) * frac
-        # wind drifts around
+        # wind drifts around. Scaled by sqrt(dt) rather than dt so the
+        # drift's per-second erraticness stays the same regardless of tick
+        # rate (a plain "* dt" random walk gets calmer as the tick rate
+        # rises -- its variance-per-second scales with dt, so it would have
+        # visibly quieted down at the 60Hz default vs. the 30Hz it was
+        # tuned at).
         if p["wind_a"]:
-            self._wind_ang += self.rng.uniform(-1.0, 1.0) * 0.7 * dt
+            self._wind_ang += self.rng.uniform(-1.0, 1.0) * WIND_DRIFT * math.sqrt(dt)
         wx = math.cos(self._wind_ang) * p["wind_a"]
         wy = math.sin(self._wind_ang) * p["wind_a"]
 
@@ -149,8 +164,11 @@ class SumoRing(MiniGame):
                 ix /= mag; iy /= mag
             e["vx"] += (ix * p["accel"] + wx) * dt
             e["vy"] += (iy * p["accel"] + wy) * dt
-            # dash: edge-triggered on the action key
-            if k["a"] and not e["prev_a"] and e["cd"] <= 0 and p["dash_v"] > 0:
+            # dash: consume the press latched by on_input. Always cleared —
+            # a press made during cooldown is discarded, not buffered
+            # (identical semantics to the old tick-time edge check, minus
+            # the lost-tap window).
+            if e["dash_req"] and e["cd"] <= 0 and p["dash_v"] > 0:
                 dx, dy = ix, iy
                 if dx == 0 and dy == 0:  # no input held: dash along motion
                     s = math.hypot(e["vx"], e["vy"])
@@ -162,7 +180,7 @@ class SumoRing(MiniGame):
                     e["cd"] = p["dash_cd"]
                     e["dash_t"] = 0.0
                     events.append(["dash", pid])
-            e["prev_a"] = k["a"]
+            e["dash_req"] = False
             e["cd"] = max(0.0, e["cd"] - dt)
             e["dash_t"] += dt
             # drag + speed clamp
@@ -275,10 +293,15 @@ class SumoRing(MiniGame):
         st = self._bot_state.setdefault(pid, {"wander": self.rng.uniform(0, 6.28), "lapse": 0.0})
         cfg = _BOT_CFG[skill]
         rng = self.rng
+        # bot_input runs once per tick; _BOT_CFG probabilities/steps were
+        # tuned per-call at a 30Hz tick. Scale by the actual tick dt so the
+        # per-second behavior (lapse frequency, dash eagerness, wander speed)
+        # is identical at any tick rate (60Hz default would've doubled them).
+        f = self._bot_dt * 30.0
 
         # occasional attention lapse (easy bots wander off)
-        st["lapse"] = max(0.0, st["lapse"] - 1 / 30)
-        if rng.random() < cfg["lapse"]:
+        st["lapse"] = max(0.0, st["lapse"] - self._bot_dt)
+        if rng.random() < cfg["lapse"] * f:
             st["lapse"] = rng.uniform(0.3, 0.9)
 
         # steer: chase nearest living opponent
@@ -299,8 +322,9 @@ class SumoRing(MiniGame):
         if dc > self.R * cfg["edge"] and st["lapse"] <= 0:
             sx, sy = CX - me["x"], CY - me["y"]
 
-        # wander + aim error
-        st["wander"] += rng.uniform(-0.4, 0.4)
+        # wander + aim error (random-walk step scales with sqrt(dt) so its
+        # drift-per-second is tick-rate-invariant, like the wind)
+        st["wander"] += rng.uniform(-0.4, 0.4) * math.sqrt(f)
         err = cfg["err"]
         ang = math.atan2(sy, sx) + rng.uniform(-err, err) + math.sin(st["wander"]) * 0.2
         if st["lapse"] > 0:
@@ -310,7 +334,7 @@ class SumoRing(MiniGame):
         keys = {"u": dy < -0.38, "d": dy > 0.38, "l": dx < -0.38, "r": dx > 0.38, "a": False}
         # dash when lined up, close and off cooldown
         if (me["cd"] <= 0 and best < 70 + me["r"] * 2.5
-                and rng.random() < cfg["dash"]):
+                and rng.random() < cfg["dash"] * f):
             keys["a"] = True
         return keys
 
