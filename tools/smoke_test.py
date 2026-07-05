@@ -263,13 +263,17 @@ async def main_flow(port, proc):
     rnd = await host.expect("round", timeout=5)
     check(rnd["game"]["id"] == "cycles", "cycles round started")
     check(rnd["arena"]["gw"] == 96, "grid arena payload")
+    check(rnd["arena"].get("action") == "BOOST", "cycles arena drives the charge meter")
     check(bool(rnd.get("preview", {}).get("heads")), "spawn preview in round msg")
+    check(len(rnd["preview"]["heads"][0]) == 8,
+          "cycles heads rows carry boost fields (8 wide)")
     await host.expect("go", timeout=6)
     end = await host.expect("end", timeout=45)
     check(len(end["placements"]) == 4, "cycles: 4 placements")
     check(min(p[1] for p in end["placements"]) == 1, "cycles: someone won")
     check(host.cells_seen > 100, f"trail cell deltas streamed ({host.cells_seen})")
     check(any(e[0] == "die" for e in host.fx), "cycles die events")
+    check(any(e[0] == "boost" for e in host.fx), "cycles boost fx (bots use boost)")
 
     print("\n== round 4: avalanche run ==")
     host.send({"t": "host", "a": "set_game", "g": "ski"})
