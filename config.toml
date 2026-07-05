@@ -9,4 +9,9 @@ host_password = "change-me"
 # Optional gate for everyone else. "" means anyone with the URL can join.
 join_password = ""
 
+# Auto-launch a Cloudflare quick tunnel at startup so remote friends get one
+# shareable https URL with nothing to install on their end (needs the
+# `cloudflared` binary on PATH — same effect as the --tunnel CLI flag).
+tunnel = false
+
 max_players = 12

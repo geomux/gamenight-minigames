@@ -78,6 +78,8 @@ class Tui:
         self.text = ""
         self.status_msg = ""
         self.buf = b""
+        self.tunnel_status = None
+        self.tunnel_url = None
 
     # ---------------------------------------------------------------- logging
 
@@ -87,6 +89,19 @@ class Tui:
             msg = msg[5:]
         self.logs.append((time.strftime("%H:%M:%S"), msg))
         self.logs = self.logs[-12:]
+        self.dirty.set()
+
+    def set_tunnel_status(self, msg):
+        self.tunnel_status = msg
+        self.dirty.set()
+
+    def on_tunnel_update(self, url, err):
+        self.tunnel_status = None
+        if url:
+            self.tunnel_url = url
+            self.log(f"tunnel ready: {url}")
+        elif err:
+            self.log(err)
         self.dirty.set()
 
     # ------------------------------------------------------------------ menu
@@ -303,6 +318,10 @@ class Tui:
         L.append(f"  {DIM}join{RESET} {CYAN}http://{self.ip}:{self.cfg['port']}{RESET}"
                  f"   {DIM}host pw{RESET} {GOLD}{self.cfg['host_password']}{RESET}"
                  + (f"   {DIM}join pw{RESET} {GOLD}{jp}{RESET}" if jp else ""))
+        if self.tunnel_url:
+            L.append(f"  {DIM}remote{RESET} {GREEN}{self.tunnel_url}{RESET}")
+        elif self.tunnel_status:
+            L.append(f"  {DIM}remote{RESET} {GREY}{self.tunnel_status}{RESET}")
 
         # live round line
         now = self.loop.time()

@@ -11,6 +11,7 @@ same port. Type 'help' in this terminal for host commands.
 
 import argparse
 import asyncio
+import re
 import secrets
 import socket
 import sys
@@ -48,10 +49,15 @@ def load_config(argv=None):
     ap.add_argument("--snapshot-rate", type=int)
     ap.add_argument("--no-tui", action="store_true",
                     help="plain line-based console instead of the dashboard")
+    ap.add_argument("--tunnel", action="store_true",
+                    help="auto-launch a Cloudflare quick tunnel so remote "
+                         "friends get one shareable https URL (needs "
+                         "`cloudflared` on PATH)")
     args = ap.parse_args(argv)
 
     cfg = dict(DEFAULTS)
     path = Path(args.config)
+    file_cfg = {}
     if path.is_file():
         with open(path, "rb") as f:
             file_cfg = tomllib.load(f)
@@ -70,6 +76,7 @@ def load_config(argv=None):
         cfg["host_password"] = secrets.token_hex(3)
         cfg["generated_pw"] = True
     cfg["no_tui"] = bool(args.no_tui)
+    cfg["tunnel"] = bool(args.tunnel) or bool(file_cfg.get("tunnel", False))
     return cfg
 
 
@@ -82,6 +89,46 @@ def lan_ip():
         return ip
     except OSError:
         return "127.0.0.1"
+
+
+TUNNEL_URL_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+
+
+async def start_tunnel(port, on_update):
+    """Launch a Cloudflare quick tunnel in the background (needs `cloudflared`
+    on PATH; nothing to sign up for). Reads its output for the https URL it
+    prints and reports back through on_update(url, err) — exactly one of the
+    two is set, called once. Returns the subprocess so the caller can
+    terminate it on shutdown, or None if cloudflared isn't installed."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "cloudflared", "tunnel", "--url", f"http://localhost:{port}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    except FileNotFoundError:
+        on_update(None, "cloudflared not found on PATH — install it "
+                        "(github.com/cloudflare/cloudflared) or drop --tunnel "
+                        "and share the LAN URL over your own VPN/tunnel.")
+        return None
+
+    async def pump():
+        found = False
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                if not found:
+                    on_update(None, "cloudflared exited before printing a URL "
+                                    "— run it by hand to see why.")
+                return
+            if not found:
+                m = TUNNEL_URL_RE.search(line.decode(errors="replace"))
+                if m:
+                    found = True
+                    on_update(m.group(0), None)
+            # keep draining stdout even after finding the URL, or the pipe
+            # backs up and eventually stalls the cloudflared process
+
+    asyncio.create_task(pump())
+    return proc
 
 
 def banner(cfg):
@@ -103,10 +150,16 @@ def banner(cfg):
         + ("   (generated this run — set one in config.toml to keep it)" if cfg["generated_pw"] else ""),
         f"  Join password:  {Y}{cfg['join_password'] or '(none — anyone with the URL can join)'}{R}",
         "",
-        "  Over the internet? Easiest is a free tunnel in a second terminal:",
-        f"      cloudflared tunnel --url http://localhost:{port}",
-        "  then share the https URL it prints. (ngrok/tailscale also work — see README.)",
-        "",
+    ]
+    if not cfg["tunnel"]:
+        lines += [
+            "  Over the internet? Easiest is a free tunnel in a second terminal:",
+            f"      cloudflared tunnel --url http://localhost:{port}",
+            "  then share the https URL it prints — or just run with --tunnel to do "
+            "this automatically. (ngrok/tailscale also work — see README.)",
+            "",
+        ]
+    lines += [
         "  Terminal commands: start · settings · bots 3 · kick <name> · help",
         "",
     ]
@@ -126,41 +179,67 @@ async def amain(cfg):
               f"Try --port {cfg['port'] + 1}.")
         return 1
 
-    # interactive dashboard when we have a real terminal, else plain console
-    if not cfg["no_tui"] and sys.stdin.isatty() and sys.stdout.isatty():
-        from tui import Tui
-        ui = Tui(room, cfg, lan_ip())
-        room.log = ui.log
-        await asyncio.gather(room.run(), ui.run())
-        return 0
-
-    banner(cfg)
-    loop = asyncio.get_event_loop()
-
-    def on_stdin():
-        line = sys.stdin.readline()
-        if not line:                       # EOF (piped stdin closed)
-            try:
-                loop.remove_reader(sys.stdin.fileno())
-            except (ValueError, OSError):
-                pass
-            return
-        try:
-            reply = room.console(line)
-        except SystemExit:
-            print("bye!")
-            for task in asyncio.all_tasks(loop):
-                task.cancel()
-            return
-        if reply:
-            print(reply)
-
+    tunnel_proc = None
     try:
-        loop.add_reader(sys.stdin.fileno(), on_stdin)
-    except (ValueError, OSError, NotImplementedError):
-        print("(no interactive terminal — use the host password web panel)")
+        # interactive dashboard when we have a real terminal, else plain console
+        if not cfg["no_tui"] and sys.stdin.isatty() and sys.stdout.isatty():
+            from tui import Tui
+            ui = Tui(room, cfg, lan_ip())
+            room.log = ui.log
+            if cfg["tunnel"]:
+                ui.set_tunnel_status("tunnel starting…")
+                tunnel_proc = await start_tunnel(cfg["port"], ui.on_tunnel_update)
+            await asyncio.gather(room.run(), ui.run())
+            return 0
 
-    await room.run()
+        if cfg["tunnel"]:
+            print("starting Cloudflare tunnel…")
+            done = asyncio.Event()
+
+            def _on_tunnel(url, err):
+                if url:
+                    print(f"  Remote friends: {url}   (anywhere — share this link)")
+                elif err:
+                    print(f"  {err}")
+                done.set()
+
+            tunnel_proc = await start_tunnel(cfg["port"], _on_tunnel)
+            if tunnel_proc:
+                try:
+                    await asyncio.wait_for(done.wait(), timeout=12.0)
+                except asyncio.TimeoutError:
+                    print("  still starting — its URL will print above once ready")
+
+        banner(cfg)
+        loop = asyncio.get_event_loop()
+
+        def on_stdin():
+            line = sys.stdin.readline()
+            if not line:                       # EOF (piped stdin closed)
+                try:
+                    loop.remove_reader(sys.stdin.fileno())
+                except (ValueError, OSError):
+                    pass
+                return
+            try:
+                reply = room.console(line)
+            except SystemExit:
+                print("bye!")
+                for task in asyncio.all_tasks(loop):
+                    task.cancel()
+                return
+            if reply:
+                print(reply)
+
+        try:
+            loop.add_reader(sys.stdin.fileno(), on_stdin)
+        except (ValueError, OSError, NotImplementedError):
+            print("(no interactive terminal — use the host password web panel)")
+
+        await room.run()
+    finally:
+        if tunnel_proc:
+            tunnel_proc.terminate()
 
 
 def main():

@@ -48,6 +48,10 @@ the terminal always has full host powers.
 **Over the internet** — pick one (a tunnel is the reliable choice; many home
 ISPs use CGNAT, which silently breaks plain port-forwarding):
 
+Easiest: start the server with `python3 server/main.py --tunnel` and it does
+the Cloudflare tunnel below for you automatically — nothing for friends to
+install, just share the printed link.
+
 | Option | How | Notes |
 |---|---|---|
 | **Cloudflare Tunnel** (recommended) | `cloudflared tunnel --url http://localhost:8000` | Free, no account needed for quick tunnels. Share the printed `https://…` URL. |
