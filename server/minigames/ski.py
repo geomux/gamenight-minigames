@@ -65,6 +65,7 @@ class AvalancheRun(MiniGame):
         self.t = 0.0
         self.order = []
         self._over = False
+        self._bot_dt = 1.0 / 30.0  # last tick dt; bot rates were tuned at 30Hz
 
         n = max(1, len(roster))
         self.ent = {}
@@ -72,7 +73,7 @@ class AvalancheRun(MiniGame):
             self.ent[pl["pid"]] = {
                 "x": WORLD_W * (i + 1) / (n + 1), "y": 200.0,
                 "vx": 0.0, "alive": True, "keys": _NO_KEYS.copy(),
-                "prev_a": False, "cd": 0.0, "tumble": 0.0,
+                "throw_req": False, "cd": 0.0, "tumble": 0.0,
             }
 
         self.obstacles = {}       # id -> [x, y, type]  (0 tree, 1 rock)
@@ -106,6 +107,12 @@ class AvalancheRun(MiniGame):
     def on_input(self, pid, keys):
         e = self.ent.get(pid)
         if e and e["alive"]:
+            # latch the rising edge of the action key here, not in tick():
+            # a quick tap whose press AND release both arrive between two
+            # ticks would otherwise never be seen by the tick-time sampler
+            # (same lost-tap class sumo's dash had).
+            if keys.get("a") and not e["keys"].get("a"):
+                e["throw_req"] = True
             e["keys"] = keys
 
     # ------------------------------------------------------------------- tick
@@ -115,6 +122,7 @@ class AvalancheRun(MiniGame):
             return
         p = self.p
         self.t += dt
+        self._bot_dt = dt   # keeps bot_input's per-second rates tick-rate-true
         self.spd = min(620.0, self.spd * (1.0 + p["ramp"] * dt))
         self.cam += self.spd * dt
         self._gen_terrain()
@@ -142,8 +150,11 @@ class AvalancheRun(MiniGame):
             slide = self.spd * (0.55 if tumbling else 1.0 + iy * 0.24)
             e["y"] += slide * dt
             e["y"] = min(e["y"], self.cam + WORLD_H - 30)   # can't outrun the screen
-            # snowball throw
-            if (not tumbling and p["ball_cd"] > 0 and k["a"] and not e["prev_a"]
+            # snowball throw: consume the press latched by on_input. Always
+            # cleared — a press during cooldown or a tumble is discarded,
+            # never buffered (identical semantics to the old tick-time edge
+            # check, minus the lost-tap window).
+            if (not tumbling and p["ball_cd"] > 0 and e["throw_req"]
                     and e["cd"] <= 0):
                 dx, dy = ix, iy
                 if dx == 0 and dy == 0:
@@ -157,7 +168,7 @@ class AvalancheRun(MiniGame):
                 self._next_bid += 1
                 e["cd"] = p["ball_cd"]
                 events.append(["throw", pid])
-            e["prev_a"] = k["a"]
+            e["throw_req"] = False
             e["cd"] = max(0.0, e["cd"] - dt)
 
             # obstacle collisions (only while not already tumbling)
@@ -293,6 +304,12 @@ class AvalancheRun(MiniGame):
                "mean": (80, 0.05, 35)}[skill]
         dodge_w, throw_p, jitter = cfg
         rng = self.rng
+        # bot_input runs once per tick; throw_p was tuned per-call at a 30Hz
+        # tick — scale by the actual tick dt so throw attempts/second stay
+        # identical at any tick rate (60Hz default would've doubled them).
+        # The steering jitter is amplitude-style (recomputed fresh each call,
+        # never accumulated), so it needs no scaling.
+        f = self._bot_dt * 30.0
 
         # dodge: strongest repulsion from the nearest obstacle just ahead
         steer = 0.0
@@ -314,7 +331,7 @@ class AvalancheRun(MiniGame):
             keys["u"] = True
 
         # opportunistic snowball at whoever is nearby
-        if me["cd"] <= 0 and self.p["ball_cd"] > 0 and rng.random() < throw_p:
+        if me["cd"] <= 0 and self.p["ball_cd"] > 0 and rng.random() < throw_p * f:
             for opid, e in self.ent.items():
                 if opid != pid and e["alive"] and abs(e["y"] - me["y"]) < 220:
                     keys["a"] = True
