@@ -57,6 +57,73 @@ function toast(msg, ms = 3500) {
   }, ms);
 }
 
+/* ====================== fullscreen prompt ====================== */
+let fsPromptEl = null;
+let hasShownLobbyPrompt = false;   // prevent spamming
+
+function isFullscreen() {
+  return !!(document.fullscreenElement ||
+  document.webkitFullscreenElement ||
+  document.msFullscreenElement ||
+  document.fullscreen ||                    // extra check
+  window.innerHeight === screen.height &&   // strong heuristic
+  window.innerWidth === screen.width);
+}
+
+function showFullscreenPrompt(isLobby = false) {
+  if (fsPromptEl) fsPromptEl.remove();
+
+  const size = isLobby ? 48 : 28;
+  const topPos = isLobby ? "50%" : "12%";
+
+  fsPromptEl = document.createElement("div");
+  fsPromptEl.style.cssText = `
+  position: fixed;
+  top: ${topPos};
+  left: 50%;
+  transform: translate(-50%, ${isLobby ? '-50%' : '0'});
+  background: rgba(0,0,0,0.9);
+  color: #ffd43b;
+  font: 900 ${size}px ui-monospace, Menlo, monospace;
+  padding: ${isLobby ? '26px 52px' : '10px 32px'};
+  border: ${isLobby ? '4px' : '3px'} solid #ffd43b;
+  border-radius: 14px;
+  text-align: center;
+  z-index: 9999;
+  pointer-events: none;
+  text-shadow: 0 3px 10px #000;
+  white-space: nowrap;
+  box-shadow: 0 15px 35px rgba(0,0,0,0.8);
+  `;
+  fsPromptEl.textContent = "Hit F11 to go full screen!";
+  document.body.appendChild(fsPromptEl);
+
+  const duration = isLobby ? 4800 : 3200;
+  setTimeout(() => {
+    if (fsPromptEl) {
+      fsPromptEl.style.transition = "opacity 0.7s";
+      fsPromptEl.style.opacity = "0";
+      setTimeout(() => {
+        if (fsPromptEl) {
+          fsPromptEl.remove();
+          fsPromptEl = null;
+        }
+      }, 700);
+    }
+  }, duration);
+}
+
+function checkFullscreenPrompt(isLobby = false) {
+  if (isFullscreen()) return;                    // ← Don't show if already fullscreen
+
+  if (isLobby) {
+    if (hasShownLobbyPrompt) return;
+    hasShownLobbyPrompt = true;
+  }
+
+  showFullscreenPrompt(isLobby);
+}
+
 /* ================================ lobby ================================ */
 
 function renderLobby() {
@@ -209,6 +276,7 @@ function startRound(m) {
   $("results").classList.add("hidden");
   $("badge-out").classList.add("hidden");
   sizeStage();   // after HUD text is set, so its measured height is accurate
+    checkFullscreenPrompt(false);
 
   const inRoster = App.you && m.roster.includes(App.you.id);
   $("badge-spec").classList.toggle("hidden", !!inRoster);
@@ -426,7 +494,10 @@ Net.on("room", (m) => {
     setPaused(false);
     showScreen("lobby");
   }
-  if (App.phase !== "join") renderLobby();
+  if (App.phase !== "join") {
+    renderLobby();
+    if (m.state === "lobby") checkFullscreenPrompt(true);   // true = big lobby version
+  }
 });
 
 Net.on("round", (m) => {
