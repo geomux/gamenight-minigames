@@ -1143,54 +1143,64 @@ const Renderer = (() => {
     c.arcTo(x, y, x + w, y, r);
     c.closePath();
   }
-
   function drawNameTags(ents) {
     const sx = cssW / W, sy = cssH / H;
     octx.textAlign = "center";
     const now = performance.now();
+
     for (const e of ents) {
       if (!e.alive) continue;
       const m = meta.get(e.pid);
       if (!m) continue;
-      const x = e.x * sx, y = (e.y - e.r) * sy - 7;
 
-      if (selfPid != null && e.pid === selfPid) {
-        // "This is you" — a bold, pulsing glow halo tucked under your name so
-        // you can spot yourself instantly in a crowded arena.
-        octx.font = "700 13px ui-monospace, Menlo, Consolas, monospace";
-        const tw = octx.measureText(m.name).width;
-        const pulse = 0.5 + 0.5 * Math.sin(now / 260);          // 0..1
-        const padX = 7, wpill = tw + padX * 2, top = y - 12, h = 16;
-        octx.save();
-        // soft colored glow that breathes
-        octx.shadowColor = m.color;
-        octx.shadowBlur = 10 + 10 * pulse;
-        octx.globalAlpha = 0.30 + 0.20 * pulse;
-        octx.fillStyle = m.color;
-        roundRectPath(octx, x - wpill / 2, top, wpill, h, 8);
-        octx.fill();
-        // crisp bright ring on top of the glow
-        octx.shadowBlur = 6 + 6 * pulse;
-        octx.globalAlpha = 0.9;
-        octx.lineWidth = 1.5;
-        octx.strokeStyle = m.color;
-        roundRectPath(octx, x - wpill / 2, top, wpill, h, 8);
-        octx.stroke();
-        octx.restore();
-        // little marker pointing down at your sprite
-        octx.fillStyle = m.color;
-        octx.font = "700 10px ui-monospace, Menlo, Consolas, monospace";
-        octx.fillText("\u25BC", x, y + 8);
-        // name: dark backing + bright white for max contrast inside the halo
-        octx.font = "700 13px ui-monospace, Menlo, Consolas, monospace";
-        octx.fillStyle = "rgba(0,0,0,.85)";
-        octx.fillText(m.name, x + 1, y + 1);
+      const x = e.x * sx;
+      const y = (e.y - e.r) * sy - 12;   // moved up a bit for bigger text
+
+      const isSelf = selfPid != null && e.pid === selfPid;
+
+      if (isSelf) {
+        // === YOU - BIG & flashy ===
+        octx.font = "700 26px ui-monospace, Menlo, Consolas, monospace";
+
+        // Strong white glow
+        octx.shadowColor = "#ffffff";
+        octx.shadowBlur = 18;
         octx.fillStyle = "#ffffff";
         octx.fillText(m.name, x, y);
+
+        // Colored glow
+        octx.shadowBlur = 10;
+        octx.shadowColor = m.color;
+        octx.fillStyle = m.color;
+        octx.fillText(m.name, x, y);
+
+        // Main crisp text
+        octx.shadowBlur = 0;
+        octx.fillStyle = "#ffffff";
+        octx.fillText(m.name, x, y);
+
+        // Down arrow
+        octx.font = "700 14px ui-monospace, Menlo, Consolas, monospace";
+        octx.fillStyle = "#fff";
+        octx.fillText("▼", x, y + 22);
+
       } else {
-        octx.font = "600 11px ui-monospace, Menlo, Consolas, monospace";
-        octx.fillStyle = "rgba(0,0,0,.75)";
-        octx.fillText(m.name, x + 1, y + 1);
+        // === Other players / bots - Still bigger ===
+        octx.font = "600 19px ui-monospace, Menlo, Consolas, monospace";
+
+        // Black shadow + white halo
+        octx.shadowColor = "#000000";
+        octx.shadowBlur = 10;
+        octx.fillStyle = "#000000";
+        octx.fillText(m.name, x + 1.5, y + 1.5);
+
+        octx.shadowBlur = 6;
+        octx.shadowColor = "#ffffff";
+        octx.fillStyle = "#ffffff";
+        octx.fillText(m.name, x, y);
+
+        // Main colored text
+        octx.shadowBlur = 0;
         octx.fillStyle = m.color;
         octx.fillText(m.name, x, y);
       }
