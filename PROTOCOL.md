@@ -26,7 +26,7 @@ in a fixed 960×540 world for Sumo and 96×54 grid cells for Light Cycles.
 | room | `{"t":"room","state","round","gameId","games":[{id,name,tag}],"schema":[…],"settings":{…},"players":[{id,name,color,host,bot,conn,wins,pts,inRound}],"maxP"}` | Full lobby state, broadcast on every change. `schema` drives the settings panel (see below). |
 | round | `{"t":"round","phase":"countdown"\|"playing","round",game:{id,name,tag,controls},"settings":{…},"arena":{…},"roster":[pids],"secs"?,"preview"?,"spectate"?}` | Round start (or context for a late joiner). `preview` is a full snapshot so spawns render during the countdown. |
 | go | `{"t":"go"}` | Countdown over, inputs live. |
-| s | `{"t":"s","g":gameId,…}` | State snapshot at snapshot-rate (default 15 Hz), **coalesced per client** (slow clients skip frames, never lag behind). |
+| s | `{"t":"s","g":gameId,…}` | State snapshot at snapshot-rate (default 20 Hz), **coalesced per client** (slow clients skip frames, never lag behind). |
 | fx | `{"t":"fx","ev":[…]}` | Reliable event list for juice (see below). |
 | end | `{"t":"end","placements":[[pid,place,pts]…],"totals":[[pid,wins,pts]…],"winner":[pids],"auto":secs}` | Round over. Placements use competition ranking (ties share a place). Auto-returns to lobby after `auto` seconds. |
 | pause | `{"t":"pause","on":bool}` | Host froze/unfroze the round. While paused the sim, countdown clock, and snapshots all stop; `round` msgs carry `"paused"` for late joiners. |
