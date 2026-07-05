@@ -79,6 +79,7 @@ class AcesHigh(MiniGame):
         self.order = []
         self._over = False
         self._bot_state = {}     # pid -> {bias, until}: attack-run offsets
+        self._bot_dt = 1.0 / 30.0  # last tick dt; bot rates were tuned at 30Hz
 
         # floating islands: solid cover — planes bounce, bullets stop
         n_isl = {"none": 0, "few": 3, "lots": 5}[s.get("islands", "few")]
@@ -125,6 +126,7 @@ class AcesHigh(MiniGame):
             return
         p = self.p
         self.t += dt
+        self._bot_dt = dt   # keeps bot_input's per-second rates tick-rate-true
         alive = [(pid, e) for pid, e in self.ent.items() if e["alive"]]
 
         # fly
@@ -310,6 +312,13 @@ class AcesHigh(MiniGame):
                "mean": (0.10, 400, 1.0)}[skill]
         aim_cone, gun_range, lead = cfg
         rng = self.rng
+        # bot_input runs once per tick; the per-call trigger probabilities
+        # below were tuned at a 30Hz tick. Scale event-rate rolls by the
+        # actual tick dt so triggers-per-second stay identical at any tick
+        # rate (the 60Hz default would've doubled them). Amplitude jitter
+        # (the aim wobble) and self.t-based state (bias/until/ext) need no
+        # scaling.
+        f = self._bot_dt * 30.0
 
         # nearest living enemy (wrap-aware)
         best, tgt = 1e9, None
@@ -339,7 +348,7 @@ class AcesHigh(MiniGame):
         want += st["bias"] * min(1.0, best / 260)
 
         # when a knife-fight drags on, extend away and come back for a pass
-        if best < 110 and self.t >= st["ext"] and rng.random() < 0.035:
+        if best < 110 and self.t >= st["ext"] and rng.random() < 0.035 * f:
             st["ext"] = self.t + rng.uniform(1.2, 2.2)
         extending = self.t < st["ext"]
         if extending:
@@ -360,13 +369,19 @@ class AcesHigh(MiniGame):
         if self.p["reverse"] < 0:
             diff = -diff       # pre-flip so reversed controls don't lobotomize bots
         keys["l"], keys["r"] = diff < -0.06, diff > 0.06
+        # NOTE deliberately NOT scaled by f: this roll is a duty cycle (u is
+        # held for exactly one tick), so its per-second effect — fraction of
+        # time throttling ≈ 0.12 — is already tick-rate-invariant. Scaling
+        # it would halve bots' average speed boost at 60Hz vs. the tuning.
         keys["u"] = extending or best > 320 or rng.random() < 0.12
         if not extending and best < 70 and abs(diff) < 0.8:   # about to ram: veer off
             keys["d"] = True
             keys["l"], keys["r"] = not keys["l"], keys["l"]
-        # fire when lined up; spray a little when nearly lined up
+        # fire when lined up; spray a little when nearly lined up (the spray
+        # roll is a per-tick retry gated by fire_cd, so it scales by f to
+        # keep the expected fire latency in the near-aim band invariant)
         keys["a"] = not extending and best < gun_range and (
-            abs(diff) < aim_cone or (abs(diff) < aim_cone * 2.2 and rng.random() < 0.5))
+            abs(diff) < aim_cone or (abs(diff) < aim_cone * 2.2 and rng.random() < 0.5 * f))
         return keys
 
 
