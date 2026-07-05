@@ -99,7 +99,10 @@ class BumperBall(MiniGame):
                 "cd": 0.0, "dash_t": 99.0,
             }
 
-        self.ball = {"x": CX, "y": CY, "vx": 0.0, "vy": 0.0}
+        # "net": which goal mouth the ball is committed into (None / 0=left /
+        # 1=right) — set once its leading edge crosses a goal line inside the
+        # mouth, cleared only by the kickoff reset. See _simulate.
+        self.ball = {"x": CX, "y": CY, "vx": 0.0, "vy": 0.0, "net": None}
         self.score = [0, 0]
         self.kickoff = 0.0
         self._place_kickoff()          # initial spots; round's own countdown covers the freeze
@@ -121,6 +124,7 @@ class BumperBall(MiniGame):
     def _place_kickoff(self):
         self.ball["x"], self.ball["y"] = CX, CY
         self.ball["vx"] = self.ball["vy"] = 0.0
+        self.ball["net"] = None
         for team in (0, 1):
             members = self.teams[team]
             n = len(members)
@@ -263,10 +267,23 @@ class BumperBall(MiniGame):
         if sp > BALL_MAXV:
             ball["vx"] *= BALL_MAXV / sp; ball["vy"] *= BALL_MAXV / sp
         in_goal_mouth = GOAL_Y0 < ball["y"] < GOAL_Y1
-        if not in_goal_mouth:
+        # once the leading edge crosses a goal line inside the mouth, the
+        # ball is COMMITTED to that net: that side's wall stops existing for
+        # it entirely — wherever y drifts afterward — until it fully clears
+        # the line and scores, or the kickoff reset re-places it. A ball
+        # that's visibly in the net must never pop back into play. (Only the
+        # committed side opens up; the opposite wall stays solid, and the
+        # geometry means players at the mouth can only knock a committed
+        # ball deeper in, never back out.)
+        if ball["net"] is None and in_goal_mouth:
             if ball["x"] < BALL_R:
-                ball["x"], ball["vx"] = BALL_R, abs(ball["vx"]) * BALL_WALL_E
+                ball["net"] = 0
             elif ball["x"] > WORLD_W - BALL_R:
+                ball["net"] = 1
+        if not in_goal_mouth:
+            if ball["net"] != 0 and ball["x"] < BALL_R:
+                ball["x"], ball["vx"] = BALL_R, abs(ball["vx"]) * BALL_WALL_E
+            elif ball["net"] != 1 and ball["x"] > WORLD_W - BALL_R:
                 ball["x"], ball["vx"] = WORLD_W - BALL_R, -abs(ball["vx"]) * BALL_WALL_E
         if ball["y"] < BALL_R:
             ball["y"], ball["vy"] = BALL_R, abs(ball["vy"]) * BALL_WALL_E
