@@ -21,6 +21,13 @@ const store = {
   set: (k, v) => localStorage.setItem(store.key(k), v),
 };
 
+/* restart a CSS animation on demand by toggling its class off and back on */
+function bump(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;   // force reflow so the browser notices the class left
+  el.classList.add(cls);
+}
+
 /* ============================== screens ============================== */
 
 function showScreen(name) {
@@ -39,11 +46,15 @@ function applyHostUI() {
 /* =============================== toasts =============================== */
 
 function toast(msg, ms = 3500) {
+  Sfx.toast();
   const el = document.createElement("div");
   el.className = "toast";
   el.textContent = msg;
   $("toasts").appendChild(el);
-  setTimeout(() => el.remove(), ms);
+  setTimeout(() => {
+    el.classList.add("toast-out");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  }, ms);
 }
 
 /* ================================ lobby ================================ */
@@ -57,6 +68,8 @@ function renderLobby() {
   list.textContent = "";
   const players = room.players;
   $("lobby-count").textContent = `${players.filter((p) => !p.bot).length}/${room.maxP}`;
+  const connCount = players.filter((p) => p.conn).length;
+  $("btn-start").classList.toggle("pulse-ready", connCount >= 2);
   for (const p of players) {
     const chip = document.createElement("div");
     chip.className = "pchip" + (p.conn ? "" : " off");
@@ -185,7 +198,6 @@ function startRound(m) {
   App.latestSnap = null;
   showScreen("game");
   Renderer.startRound(m.arena, m.roster, App.players);
-  sizeStage();
 
   $("hud-round").textContent = `ROUND ${m.round}`;
   $("hud-game").textContent = m.game.name;
@@ -196,6 +208,7 @@ function startRound(m) {
   $("hud-controls").style.opacity = 1;
   $("results").classList.add("hidden");
   $("badge-out").classList.add("hidden");
+  sizeStage();   // after HUD text is set, so its measured height is accurate
 
   const inRoster = App.you && m.roster.includes(App.you.id);
   $("badge-spec").classList.toggle("hidden", !!inRoster);
@@ -206,6 +219,7 @@ function startRound(m) {
   $("charge-label").textContent = (m.arena && m.arena.action) || "";
   $("charge-meter").classList.toggle("hidden", !App.hasAction);
   $("charge-meter").classList.remove("ready");
+  Touch.setActionLabel((m.arena && m.arena.action) || "");
 
   // intro overlay with countdown
   if (m.phase === "countdown") {
@@ -218,10 +232,16 @@ function startRound(m) {
     $("intro-chips").appendChild(chipEls(chips, "mod"));
     let left = Math.ceil(m.secs ?? 3);
     $("intro-count").textContent = left;
+    bump($("intro-count"), "pop");
+    Sfx.tick();
     clearInterval(App.introTimer);
     App.introTimer = setInterval(() => {
       left--;
-      if (left > 0) $("intro-count").textContent = left;
+      if (left > 0) {
+        $("intro-count").textContent = left;
+        bump($("intro-count"), "pop");
+        Sfx.tick();
+      }
     }, 1000);
   } else {
     $("intro").classList.add("hidden");
@@ -233,6 +253,7 @@ function onGo() {
   clearInterval(App.introTimer);
   $("intro").classList.add("hidden");
   Renderer.flash("GO!");
+  Sfx.go();
   sendKeys(true);
   setTimeout(() => { $("hud-controls").style.opacity = 0; }, 4000);
 }
@@ -244,14 +265,18 @@ function onEnd(m) {
   const totals = new Map(m.totals.map(([pid, wins, pts]) => [pid, { wins, pts }]));
   const winners = m.winner.map((pid) => (App.players.get(pid) || {}).name || "?");
   $("res-winner").textContent = winners.join(" & ") || "NOBODY";
+  const winnerColor = m.winner.length === 1 ? (App.players.get(m.winner[0]) || {}).color : null;
+  $("res-winner").style.color = winnerColor || "";   // "" restores the CSS gold default
   const body = $("res-table");
   body.textContent = "";
+  const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
+  const MEDAL_COLOR = { 1: "var(--gold)", 2: "#cfd8e3", 3: "#d8975a" };
   for (const [pid, place, pts] of m.placements) {
     const p = App.players.get(pid) || { name: "?", color: "#888" };
     const tr = document.createElement("tr");
     const c0 = document.createElement("td");
-    c0.textContent = "#" + place;
-    c0.style.color = place === 1 ? "var(--gold)" : "var(--dim)";
+    c0.textContent = MEDAL[place] || "#" + place;
+    c0.style.color = MEDAL_COLOR[place] || "var(--dim)";
     const c1 = document.createElement("td");
     c1.textContent = p.name;
     c1.style.color = p.color;
@@ -266,6 +291,7 @@ function onEnd(m) {
   }
   $("results").classList.remove("hidden");
   Renderer.celebrate(m.winner.map((pid) => (App.players.get(pid) || {}).color || "#ffd43b"));
+  Sfx.win();
 
   let left = m.auto || 14;
   clearInterval(App.resTimer);
@@ -302,7 +328,8 @@ window.addEventListener("keydown", (e) => {
   if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
   const k = KEYMAP[e.code];
   if (!k) return;
-  e.preventDefault();
+  e.preventDefault();          // game keys never scroll/type, even on repeat
+  if (e.repeat) return;        // ignore OS key-repeat; state is already latched
   if (!keys[k]) { keys[k] = true; sendKeys(); }
 });
 window.addEventListener("keyup", (e) => {
@@ -312,21 +339,52 @@ window.addEventListener("keyup", (e) => {
 });
 setInterval(() => { if (App.phase === "playing") sendKeys(); }, 1000);  // self-heal
 
+/* stuck-keys guard: alt-tab / app-switch mid-round must never leave a key
+   latched forever — zero everything and push the cleared state right away. */
+function clearAllKeys() {
+  keys.u = keys.d = keys.l = keys.r = keys.a = false;
+  sendKeys();
+}
+window.addEventListener("blur", clearAllKeys);
+document.addEventListener("visibilitychange", () => { if (document.hidden) clearAllKeys(); });
+
+/* mobile touch layer drives the same key state the keyboard does */
+Touch.init((k, v) => { if (keys[k] !== v) { keys[k] = v; sendKeys(); } });
+
 /* ============================ stage sizing ============================ */
+
+function viewportSize() {
+  // visualViewport tracks the actually-visible area on mobile (browser
+  // chrome, keyboard) far more reliably than innerWidth/Height.
+  const vv = window.visualViewport;
+  return vv ? { w: vv.width, h: vv.height } : { w: window.innerWidth, h: window.innerHeight };
+}
+
+function cssVarPx(name) {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+}
 
 function sizeStage() {
   const stage = $("stage");
-  const availW = window.innerWidth;
-  const availH = window.innerHeight - 70;
+  const { w: vw, h: vh } = viewportSize();
+  const hudH = $("hud").offsetHeight || 34;           // measured, not guessed
+  const sab = cssVarPx("--sab"), sal = cssVarPx("--sal"), sar = cssVarPx("--sar");
+  const topGap = hudH + 4;                            // #scr-game is flex-start now,
+  const availW = Math.max(100, vw - sal - sar);        // so this exactly clears the HUD
+  const availH = Math.max(100, vh - topGap - sab - 6);
   const scale = Math.min(availW / 960, availH / 540);
   const w = Math.floor(960 * scale), h = Math.floor(540 * scale);
   stage.style.width = w + "px";
   stage.style.height = h + "px";
+  stage.style.marginTop = topGap + "px";
   $("world").style.width = w + "px";
   $("world").style.height = h + "px";
   Renderer.resize(w, h);
 }
 window.addEventListener("resize", () => { if (App.phase !== "join") sizeStage(); });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => { if (App.phase !== "join") sizeStage(); });
+}
 
 /* =============================== wiring =============================== */
 
@@ -394,20 +452,26 @@ Net.on("s", (m) => {
   $("hud-alive").textContent = `${alive} ALIVE`;
   if (App.you) {
     const mine = rows.find((e) => e[0] === App.you.id);
-    $("badge-out").classList.toggle("hidden", !(mine && !mine[3] && App.phase === "playing"));
+    const isOut = !!(mine && !mine[3] && App.phase === "playing");
+    const wasOut = !$("badge-out").classList.contains("hidden");
+    $("badge-out").classList.toggle("hidden", !isOut);
+    if (isOut && !wasOut) { Sfx.out(); bump($("badge-out"), "shake-in"); }
     if (App.hasAction) {
       const dead = !mine || !mine[3];
       $("charge-meter").classList.toggle("hidden", dead || App.phase === "results");
       if (!dead) {
         const charge = Math.max(0, Math.min(1, mine[4] ?? 0));
         $("charge-fill").style.height = Math.round(charge * 100) + "%";
-        $("charge-meter").classList.toggle("ready", charge >= 1);
+        const nowReady = charge >= 1;
+        const wasReady = $("charge-meter").classList.contains("ready");
+        $("charge-meter").classList.toggle("ready", nowReady);
+        if (nowReady && !wasReady) bump($("charge-meter"), "punch");
       }
     }
   }
 });
 
-Net.on("fx", (m) => Renderer.fx(m.ev));
+Net.on("fx", (m) => { Renderer.fx(m.ev); Sfx.fx(m.ev); });
 Net.on("end", onEnd);
 Net.on("toast", (m) => toast(m.msg));
 
@@ -421,7 +485,11 @@ Net.on("kicked", (m) => {
 
 let pingT0 = 0;
 Net.on("pong", (m) => {
-  $("hud-ping").textContent = Math.round(performance.now() - m.ts) + "ms";
+  const ms = Math.round(performance.now() - m.ts);
+  $("hud-ping").textContent = ms + "ms";
+  const dot = $("hud-ping-dot");
+  dot.classList.remove("good", "okay", "bad");
+  dot.classList.add(ms < 60 ? "good" : ms < 120 ? "okay" : "bad");
 });
 setInterval(() => Net.send({ t: "ping", ts: performance.now() }), 2000);
 
@@ -429,6 +497,7 @@ Net.onStatus((up) => $("reconnect").classList.toggle("hidden", up));
 
 /* join button */
 function doJoin() {
+  Sfx.init();   // unlock/resume AudioContext on this first real user gesture
   const name = $("in-name").value.trim();
   if (!name) { $("join-err").textContent = "pick a name first"; return; }
   const pw = $("in-pw").value;
@@ -448,5 +517,30 @@ $("btn-reset-scores").onclick = () => Net.send({ t: "host", a: "reset_scores" })
 $("btn-resume").onclick = () => Net.send({ t: "host", a: "pause", v: false });
 $("btn-endround").onclick = () => Net.send({ t: "host", a: "abort" });
 $("game-select").onchange = (e) => Net.send({ t: "host", a: "set_game", g: e.target.value });
+
+/* sound: a tiny UI-click blip on any button, plus the mute toggle */
+document.addEventListener("click", (e) => {
+  if (e.target instanceof Element && e.target.closest(".btn, .mute-btn")) {
+    Sfx.init();       // any button click is a valid gesture — also revives iOS audio
+    Sfx.click();
+  }
+});
+/* iOS suspends the AudioContext on app-switch; any tap after returning
+   (pointerup = touchend, a valid activation gesture everywhere) revives it. */
+window.addEventListener("pointerup", () => Sfx.init(), { passive: true });
+let muted = store.get("mute") === "1";
+function updateMuteBtn() {
+  $("btn-mute").textContent = muted ? "🔇" : "🔊";
+  $("btn-mute").classList.toggle("muted", muted);
+}
+Sfx.setMuted(muted);
+updateMuteBtn();
+$("btn-mute").onclick = () => {
+  Sfx.init();
+  muted = !muted;
+  store.set("mute", muted ? "1" : "0");
+  Sfx.setMuted(muted);
+  updateMuteBtn();
+};
 
 Net.connect();
