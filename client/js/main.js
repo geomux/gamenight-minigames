@@ -399,6 +399,7 @@ Net.on("hello", (m) => {
 
 Net.on("joined", (m) => {
   App.you = m.you;
+  Renderer.setSelf(App.you ? App.you.id : null);
   store.set("sess", m.sess);
   store.set("name", m.you.name);
   $("join-err").textContent = "";

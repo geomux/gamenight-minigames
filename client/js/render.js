@@ -17,6 +17,7 @@ const Renderer = (() => {
   // round state
   let arena = null;
   let meta = new Map();            // pid -> {name, color}
+  let selfPid = null;              // local player id, for the "you" halo
   let snaps = [];                  // [{t, R, wind, e:Map(pid->[x,y,alive,cd,r])}]
   let snapGap = 66;                // ema of ms between snapshots
 
@@ -1132,19 +1133,67 @@ const Renderer = (() => {
     }
   }
 
+  function roundRectPath(c, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
   function drawNameTags(ents) {
     const sx = cssW / W, sy = cssH / H;
-    octx.font = "600 11px ui-monospace, Menlo, Consolas, monospace";
     octx.textAlign = "center";
+    const now = performance.now();
     for (const e of ents) {
       if (!e.alive) continue;
       const m = meta.get(e.pid);
       if (!m) continue;
       const x = e.x * sx, y = (e.y - e.r) * sy - 7;
-      octx.fillStyle = "rgba(0,0,0,.75)";
-      octx.fillText(m.name, x + 1, y + 1);
-      octx.fillStyle = m.color;
-      octx.fillText(m.name, x, y);
+
+      if (selfPid != null && e.pid === selfPid) {
+        // "This is you" — a bold, pulsing glow halo tucked under your name so
+        // you can spot yourself instantly in a crowded arena.
+        octx.font = "700 13px ui-monospace, Menlo, Consolas, monospace";
+        const tw = octx.measureText(m.name).width;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 260);          // 0..1
+        const padX = 7, wpill = tw + padX * 2, top = y - 12, h = 16;
+        octx.save();
+        // soft colored glow that breathes
+        octx.shadowColor = m.color;
+        octx.shadowBlur = 10 + 10 * pulse;
+        octx.globalAlpha = 0.30 + 0.20 * pulse;
+        octx.fillStyle = m.color;
+        roundRectPath(octx, x - wpill / 2, top, wpill, h, 8);
+        octx.fill();
+        // crisp bright ring on top of the glow
+        octx.shadowBlur = 6 + 6 * pulse;
+        octx.globalAlpha = 0.9;
+        octx.lineWidth = 1.5;
+        octx.strokeStyle = m.color;
+        roundRectPath(octx, x - wpill / 2, top, wpill, h, 8);
+        octx.stroke();
+        octx.restore();
+        // little marker pointing down at your sprite
+        octx.fillStyle = m.color;
+        octx.font = "700 10px ui-monospace, Menlo, Consolas, monospace";
+        octx.fillText("\u25BC", x, y + 8);
+        // name: dark backing + bright white for max contrast inside the halo
+        octx.font = "700 13px ui-monospace, Menlo, Consolas, monospace";
+        octx.fillStyle = "rgba(0,0,0,.85)";
+        octx.fillText(m.name, x + 1, y + 1);
+        octx.fillStyle = "#ffffff";
+        octx.fillText(m.name, x, y);
+      } else {
+        octx.font = "600 11px ui-monospace, Menlo, Consolas, monospace";
+        octx.fillStyle = "rgba(0,0,0,.75)";
+        octx.fillText(m.name, x + 1, y + 1);
+        octx.fillStyle = m.color;
+        octx.fillText(m.name, x, y);
+      }
     }
   }
 
@@ -1284,5 +1333,7 @@ const Renderer = (() => {
 
   requestAnimationFrame(frame);
 
-  return { startRound, addSnapshot, resize, fx, flash, celebrate };
+  function setSelf(pid) { selfPid = pid == null ? null : pid; }
+
+  return { startRound, addSnapshot, resize, fx, flash, celebrate, setSelf };
 })();
