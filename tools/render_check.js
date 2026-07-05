@@ -88,4 +88,23 @@ Renderer.fx([["shoot", 1], ["hitp", 2, 20, 490], ["clash", 400, 300],
 frames(30);
 console.log("planes draw path OK");
 
+// --- bumper ---
+Renderer.startRound({ g: "bumper", w: 960, h: 540, teams: [[1], [2]], goalH: 180, action: "DASH" }, [1, 2], meta);
+Renderer.addSnapshot({ t: "s", g: "bumper", score: [0, 0],
+                       e: [[1, 300, 270, 1, 0.5], [2, 660, 270, 1, 1]],
+                       ball: [480, 270, 120, -40] });
+T += 66;
+Renderer.addSnapshot({ t: "s", g: "bumper", score: [1, 0], ko: 1.2,
+                       e: [[1, 350, 270, 1, 0.6], [2, 610, 270, 1, 1]],
+                       ball: [500, 260, 90, -30] });
+Renderer.fx([["dash", 1], ["hit", 480, 270, 0.6], ["goal", 0, 960, 270]]);
+frames(30);
+// no-action variant (dash setting off): e-rows still 5-wide, charge pinned 0
+Renderer.startRound({ g: "bumper", w: 960, h: 540, teams: [[1], [2]], goalH: 180 }, [1, 2], meta);
+Renderer.addSnapshot({ t: "s", g: "bumper", score: [0, 0],
+                       e: [[1, 300, 270, 1, 0], [2, 660, 270, 1, 0]],
+                       ball: [480, 270, 0, 0] });
+frames(10);
+console.log("bumper draw path OK");
+
 console.log("RENDERER HEADLESS EXERCISE PASSED");

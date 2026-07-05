@@ -334,6 +334,42 @@ async def main_flow(port, proc):
     check("shoot" in kinds and ("hitp" in kinds or "down" in kinds),
           f"planes fx flowed ({sorted(kinds)})")
 
+    print("\n== round 6: bumper ball ==")
+    host.send({"t": "host", "a": "set_game", "g": "bumper"})
+    room = await host.expect("room", where=lambda m: m["gameId"] == "bumper", timeout=5)
+    check(any(g["id"] == "bumper" for g in room["games"]), "bumper listed in game menu")
+    host.send({"t": "host", "a": "set", "k": "round_time", "v": 30})
+    host.send({"t": "host", "a": "set", "k": "goals", "v": 2})
+    host.send({"t": "host", "a": "set", "k": "bots", "v": 3})   # settings are per-game
+    host.send({"t": "host", "a": "set", "k": "bot_skill", "v": "mean"})
+    await host.expect("room", where=lambda m: m["settings"].get("bots") == 3, timeout=5)
+    host.fx = []
+    host.send({"t": "host", "a": "start"})
+    rnd = await host.expect("round", timeout=5)
+    check(rnd["game"]["id"] == "bumper", "bumper round started")
+    check(rnd["arena"].get("action") == "DASH", "bumper arena drives the charge meter")
+    teams = rnd["arena"].get("teams", [])
+    check(len(teams) == 2 and len(teams[0]) + len(teams[1]) == 4,
+          f"bumper arena carries the team split ({teams})")
+    check(rnd["arena"].get("goalH", 0) > 0, "bumper arena carries goal-mouth geometry")
+    preview = rnd.get("preview", {})
+    check(bool(preview.get("e")) and len(preview["e"][0]) == 5,
+          "bumper preview e-rows are 5-wide [pid,x,y,alive,dash01]")
+    check(len(preview.get("ball", [])) == 4, "bumper preview carries ball position+velocity")
+    await host.expect("go", timeout=6)
+    end = await host.expect("end", timeout=45)
+    check(len(end["placements"]) == 4, "bumper: 4 placements")
+    places = sorted(p[1] for p in end["placements"])
+    check(places == [1, 1, 1, 1] or places == [1, 1, 2, 2],
+          f"bumper placements are a clean team win or an all-1 draw ({places})")
+    kinds = {e[0] for e in host.fx}
+    check("dash" in kinds, f"bumper fx flowed ({sorted(kinds)})")   # NOT "goal": a goalless draw is valid
+    snap = host.last_snap or {}
+    check(snap.get("g") == "bumper" and len(snap.get("score", [])) == 2,
+          "bumper snapshot carries [red,blue] score")
+    check(bool(snap.get("e")) and len(snap["e"][0]) == 5, "bumper snapshot e-rows are 5-wide")
+    check(len(snap.get("ball", [])) == 4, "bumper snapshot ball carries position+velocity")
+
     print("\n== pause menu 'end round' (ws host action) ==")
     host.send({"t": "host", "a": "set_game", "g": "sumo"})
     await host.expect("room", where=lambda m: m["gameId"] == "sumo", timeout=5)
