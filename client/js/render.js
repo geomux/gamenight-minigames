@@ -48,6 +48,12 @@ const Renderer = (() => {
   let isleCv = null;               // cached island layer for this round
   let planeBullets = new Map();    // bid -> {x,y,vx,vy,t} dead-reckoning registry
 
+  // bumper-ball state
+  let bumperBall = new Map();      // single-entry dead-reckoning registry (ball has no id; key 0)
+  let bumperTeamOf = new Map();    // pid -> 0 (red) | 1 (blue), from the arena payload
+  const BUMPER_R = 13;             // player body radius (fixed; not sent over the wire)
+  const TEAM_HUES = ["#ff3b5c", "#2fb8ff"];   // red / blue team-ring accent colors
+
   /* ------------------------------ helpers ------------------------------ */
 
   function shade(hex, f) {
@@ -579,6 +585,114 @@ const Renderer = (() => {
     }
   }
 
+  /* --------------------------- bumper-ball helpers --------------------------- */
+
+  function drawGoalMouth(edgeX, y0, y1, color) {
+    const depth = 10, dir = edgeX === 0 ? 1 : -1;
+    wctx.fillStyle = "rgba(8,10,20,.55)";           // net pocket shadow
+    wctx.fillRect(edgeX === 0 ? 0 : W - depth, y0, depth, y1 - y0);
+    wctx.strokeStyle = "rgba(230,240,255,.35)";     // net crosshatch
+    wctx.lineWidth = 1;
+    for (let yy = y0; yy <= y1; yy += 4) {
+      wctx.beginPath(); wctx.moveTo(edgeX, yy); wctx.lineTo(edgeX + dir * depth, yy); wctx.stroke();
+    }
+    for (let xx = 0; xx <= depth; xx += 4) {
+      const x = edgeX + dir * xx;
+      wctx.beginPath(); wctx.moveTo(x, y0); wctx.lineTo(x, y1); wctx.stroke();
+    }
+    wctx.strokeStyle = color;                       // team-colored goal line + posts
+    wctx.lineWidth = 2;
+    const lineX = edgeX === 0 ? 0.5 : W - 0.5;
+    wctx.beginPath(); wctx.moveTo(lineX, y0); wctx.lineTo(lineX, y1); wctx.stroke();
+    wctx.beginPath(); wctx.moveTo(edgeX, y0); wctx.lineTo(edgeX + dir * depth, y0); wctx.stroke();
+    wctx.beginPath(); wctx.moveTo(edgeX, y1); wctx.lineTo(edgeX + dir * depth, y1); wctx.stroke();
+  }
+
+  function drawBumperField() {
+    const goalH = (arena.goalH || 180) * S;
+    const gy0 = H / 2 - goalH / 2, gy1 = H / 2 + goalH / 2;
+    wctx.strokeStyle = "rgba(255,255,255,.16)";
+    wctx.lineWidth = 1;
+    wctx.beginPath(); wctx.moveTo(W / 2, 0); wctx.lineTo(W / 2, H); wctx.stroke();
+    wctx.beginPath(); wctx.arc(W / 2, H / 2, 34, 0, Math.PI * 2); wctx.stroke();
+    wctx.fillStyle = "rgba(255,255,255,.4)";
+    wctx.beginPath(); wctx.arc(W / 2, H / 2, 2, 0, Math.PI * 2); wctx.fill();
+    drawGoalMouth(0, gy0, gy1, TEAM_HUES[0]);
+    drawGoalMouth(W, gy0, gy1, TEAM_HUES[1]);
+  }
+
+  function drawTeamRing(e, team) {
+    if (team == null) return;                       // thin rim so 12 player colors still read by team
+    wctx.beginPath();
+    wctx.arc(e.x, e.y, e.r + 2.2, 0, Math.PI * 2);
+    wctx.strokeStyle = TEAM_HUES[team];
+    wctx.lineWidth = 2;
+    wctx.stroke();
+  }
+
+  function drawBumperBall(x, y, vx, vy) {
+    const spd = Math.hypot(vx, vy);
+    if (spd > 40) {                                  // short motion streak at speed
+      const dx = vx / spd, dy = vy / spd;
+      for (let i = 2; i >= 1; i--) {
+        wctx.fillStyle = `rgba(255,225,140,${0.16 * i})`;
+        wctx.beginPath();
+        wctx.arc(x - dx * i * 3.4, y - dy * i * 3.4, 4.6 - i * 0.6, 0, Math.PI * 2);
+        wctx.fill();
+      }
+    }
+    wctx.fillStyle = "rgba(0,0,0,.35)";
+    wctx.beginPath(); wctx.ellipse(x + 1, y + 3, 4.6, 2.2, 0, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "#fff6d8";                       // white/gold body
+    wctx.beginPath(); wctx.arc(x, y, 5, 0, Math.PI * 2); wctx.fill();
+    wctx.lineWidth = 1.3;
+    wctx.strokeStyle = "#3a2f14";
+    wctx.stroke();
+    wctx.fillStyle = "#d9b85e";                       // a single dark patch hints "ball", not "marble"
+    wctx.beginPath(); wctx.arc(x - 1.3, y - 1.1, 1.5, 0, Math.PI * 2); wctx.fill();
+    wctx.fillStyle = "rgba(255,255,255,.9)";
+    wctx.fillRect(x - 2, y - 2.3, 1.3, 1.3);
+  }
+
+  function drawKickoffShimmer() {
+    const pulse = 0.3 + 0.35 * Math.sin(performance.now() / 140);
+    wctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+    wctx.lineWidth = 2;
+    wctx.beginPath(); wctx.arc(W / 2, H / 2, 38, 0, Math.PI * 2); wctx.stroke();
+  }
+
+  function drawBumper(s) {
+    drawBumperField();
+    for (const b of liveProjectiles(bumperBall)) {    // ball, dead-reckoned
+      drawBumperBall(b.x * S, b.y * S, b.vx, b.vy);
+    }
+    const ents = s.ents.slice().sort((a, b) => a.y - b.y);
+    for (const e of ents) {
+      drawTeamRing(e, bumperTeamOf.get(e.pid));
+      drawPlayer(e);
+    }
+    if (s.ko) drawKickoffShimmer();
+  }
+
+  function drawBumperScore(score) {
+    if (!score) return;
+    octx.font = "900 22px ui-monospace, Menlo, monospace";
+    const rt = String(score[0]), mid = " — ", bt = String(score[1]);
+    const wR = octx.measureText(rt).width, wM = octx.measureText(mid).width, wB = octx.measureText(bt).width;
+    const x0 = cssW / 2 - (wR + wM + wB) / 2, y = 24;
+    let x = x0;
+    octx.textAlign = "left";
+    octx.fillStyle = "rgba(0,0,0,.7)";
+    octx.fillText(rt + mid + bt, x0 + 2, y + 2);
+    octx.fillStyle = TEAM_HUES[0];
+    octx.fillText(rt, x, y); x += wR;
+    octx.fillStyle = "rgba(255,255,255,.85)";
+    octx.fillText(mid, x, y); x += wM;
+    octx.fillStyle = TEAM_HUES[1];
+    octx.fillText(bt, x, y);
+    octx.textAlign = "center";
+  }
+
   /* ------------------------------ round api ------------------------------ */
 
   function startRound(a, roster, playersMeta) {
@@ -594,6 +708,13 @@ const Renderer = (() => {
     obsMap = new Map();
     skiBalls = new Map();
     planeBullets = new Map();
+    bumperBall = new Map();
+    bumperTeamOf = new Map();
+    if (a.g === "bumper") {
+      for (const t of [0, 1]) {
+        for (const pid of (a.teams && a.teams[t]) || []) bumperTeamOf.set(pid, t);
+      }
+    }
     if (a.g === "cycles") {
       cellW = W / a.gw;
       cellH = H / a.gh;
@@ -644,6 +765,12 @@ const Renderer = (() => {
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,ang,hp,inv]
       upsertProjectiles(planeBullets, m.b || []);          // [bid,x,y,vx,vy]
       snaps.push({ t: now, pln: true, e });
+    } else if (m.g === "bumper") {
+      const e = new Map();
+      for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,dash01]
+      const ball = m.ball || [480, 270, 0, 0];
+      upsertProjectiles(bumperBall, [[0, ball[0], ball[1], ball[2], ball[3]]]);
+      snaps.push({ t: now, bmp: true, score: m.score || [0, 0], ko: m.ko, e });
     } else {
       const e = new Map();
       for (const row of m.e) e.set(row[0], row.slice(1)); // [x,y,alive,cd,r]
@@ -780,6 +907,11 @@ const Renderer = (() => {
         fallers.push({ x: x * S, y: y * S, vx: (Math.random() - 0.5) * 30, vy: 26,
                        r: 6, color: m.color, rot: 0, vr: 9, t: 0, life: 1.1 });
         shake = Math.max(shake, 7);
+      } else if (kind === "goal") {
+        const [, team, x, y] = ev;
+        spark(x * S, y * S, 40, [TEAM_HUES[team] || "#fff", "#fff", "#ffd43b"], 130);
+        shake = Math.max(shake, 8);
+        flash("GOAL!");
       } else if (kind === "fall") {
         const [, pid, x, y, vx, vy] = ev;
         const m = meta.get(pid) || { color: "#888", name: "?" };
@@ -873,6 +1005,20 @@ const Renderer = (() => {
           y: (((y0 + (e1[1] - y0) * a) % 540) + 540) % 540 * S,
           ang: a0 + da * a, turn: da,
           alive: e1[2] === 1, cd: e1[3], hp: e1[5], inv: e1[6] === 1, r: 6,
+        });
+      }
+      return out;
+    }
+    if (s1.bmp) {
+      const out = { bmp: true, score: s1.score || [0, 0], ko: s1.ko, ents: [] };
+      for (const [pid, e1] of s1.e) {
+        const e0 = (s0.bmp && s0.e.get(pid)) || e1;
+        out.ents.push({
+          pid,
+          x: (e0[0] + (e1[0] - e0[0]) * a) * S,
+          y: (e0[1] + (e1[1] - e0[1]) * a) * S,
+          vx: e1[0] - e0[0], vy: e1[1] - e0[1],
+          alive: true, cd: e1[3], r: BUMPER_R * S,
         });
       }
       return out;
@@ -1103,6 +1249,8 @@ const Renderer = (() => {
         drawSki(s);
       } else if (s.pln) {
         drawPlanes(s);
+      } else if (s.bmp) {
+        drawBumper(s);
       } else {
         drawRing(s.R);
         drawWind(s.wind);
@@ -1115,6 +1263,7 @@ const Renderer = (() => {
       drawParticles(dt);
       drawNameTags(s.ents);
       if (s.pln) drawHearts(s.ents);
+      if (s.bmp) drawBumperScore(s.score);
     } else if (arena.g === "cycles") {
       drawCycles({ margin: 0, ents: [] });
       drawParticles(dt);
@@ -1123,6 +1272,9 @@ const Renderer = (() => {
       drawParticles(dt);
     } else if (arena.g === "planes") {
       if (skyBg) drawPlanes({ ents: [] });
+      drawParticles(dt);
+    } else if (arena.g === "bumper") {
+      drawBumperField();
       drawParticles(dt);
     } else {
       drawRing((arena.R0 || 232) * S);
