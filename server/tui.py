@@ -15,11 +15,47 @@ import re
 import shutil
 import signal
 import sys
-import termios
 import time
-import tty
 
 from minigames import GAMES
+
+IS_WINDOWS = sys.platform == "win32"
+
+# Terminal control is platform-specific: POSIX uses termios/tty for raw mode
+# and os.read + loop.add_reader for async stdin; Windows has none of those and
+# uses msvcrt for single-keypress reads plus ctypes to turn on ANSI/VT output.
+# Import conditionally so this module loads cleanly on either OS.
+if IS_WINDOWS:
+    import ctypes
+    import msvcrt
+else:
+    import termios
+    import tty
+
+
+def _enable_windows_vt():
+    """Turn on ANSI/VT100 escape-sequence processing for the Windows console.
+
+    Windows 10+ consoles understand the same `\\x1b[...` codes we emit for
+    color, the alt-screen buffer, and cursor hiding, but only after
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING is set on the stdout handle. Do this
+    before writing any escape codes. Best-effort: on an old console it just
+    stays off and we degrade to visible escape codes rather than crashing.
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        STD_OUTPUT_HANDLE = -11
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(
+                handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    except Exception:
+        pass
+
 
 CSI = "\x1b["
 ALT_ON = CSI + "?1049h" + CSI + "?25l"    # alt screen, hide cursor
@@ -77,7 +113,9 @@ class Tui:
         self.mode = "menu"          # menu | kick | text
         self.text = ""
         self.status_msg = ""
-        self.buf = b""
+        # POSIX reads raw bytes via os.read; Windows reads wide chars via
+        # msvcrt.getwch. _pop_key handles each accordingly.
+        self.buf = "" if IS_WINDOWS else b""
         self.tunnel_status = None
         self.tunnel_url = None
 
@@ -157,6 +195,7 @@ class Tui:
     # ----------------------------------------------------------------- input
 
     def _on_stdin(self):
+        # POSIX only — driven by loop.add_reader on the stdin fd.
         try:
             data = os.read(self.fd, 128)
         except OSError:
@@ -164,6 +203,22 @@ class Tui:
         if not data:
             return
         self.buf += data
+        self._drain_keys()
+
+    async def _win_input_loop(self):
+        # Windows has no add_reader for stdin, so poll msvcrt for keypresses on
+        # a short interval and feed them through the same _pop_key/_key path.
+        # ~20ms keeps typing responsive without busy-spinning the CPU.
+        while True:
+            got = False
+            while msvcrt.kbhit():
+                self.buf += msvcrt.getwch()
+                got = True
+            if got:
+                self._drain_keys()
+            await asyncio.sleep(0.02)
+
+    def _drain_keys(self):
         while self.buf:
             key, self.buf = self._pop_key(self.buf)
             if key is None:
@@ -177,6 +232,8 @@ class Tui:
 
     @staticmethod
     def _pop_key(buf):
+        if IS_WINDOWS:
+            return Tui._pop_key_win(buf)
         if buf.startswith(b"\x1b"):
             if buf == b"\x1b":
                 return "esc", b""
@@ -188,6 +245,28 @@ class Tui:
             return "?", buf[2:]
         ch = buf[:1].decode("utf-8", "ignore")
         return (ch or "?"), buf[1:]
+
+    @staticmethod
+    def _pop_key_win(buf):
+        # msvcrt.getwch returns wide chars, so buf is a str here (not bytes).
+        # Arrow/function keys arrive as a two-char sequence: a prefix of
+        # '\x00' or '\xe0' followed by a scan code (H=up, P=down, K=left,
+        # M=right) — nothing like the ANSI '\x1b[A' sequences read on POSIX.
+        # Map them to the same "up"/"down"/"left"/"right" strings _key expects.
+        head = buf[:1]
+        if head in ("\x00", "\xe0"):
+            if len(buf) < 2:
+                return None, buf          # wait for the scan-code char
+            code = {"H": "up", "P": "down", "K": "left",
+                    "M": "right"}.get(buf[1:2])
+            return (code or "?"), buf[2:]
+        if head == "\x1b":
+            return "esc", buf[1:]
+        if head == "\x08":
+            # msvcrt reports Backspace as \x08; normalize to the DEL (\x7f)
+            # that the POSIX path (and _key's text mode) already handle.
+            return "\x7f", buf[1:]
+        return (head or "?"), buf[1:]
 
     def _key(self, k):
         if self.mode == "text":
@@ -431,15 +510,26 @@ class Tui:
     # ------------------------------------------------------------------- run
 
     async def run(self):
-        old = termios.tcgetattr(self.fd)
-        tty.setcbreak(self.fd)
+        old = None
+        win_input_task = None
+        if IS_WINDOWS:
+            _enable_windows_vt()
+        else:
+            old = termios.tcgetattr(self.fd)
+            tty.setcbreak(self.fd)
         sys.stdout.write(ALT_ON)
         sys.stdout.flush()
-        self.loop.add_reader(self.fd, self._on_stdin)
-        try:
-            self.loop.add_signal_handler(signal.SIGWINCH, self.dirty.set)
-        except (NotImplementedError, ValueError, OSError):
-            pass
+        if IS_WINDOWS:
+            # No add_reader for stdin and no SIGWINCH on Windows: poll msvcrt
+            # for keys, and rely on the 1s ticker below + _draw re-reading
+            # shutil.get_terminal_size() every redraw to pick up resizes.
+            win_input_task = asyncio.create_task(self._win_input_loop())
+        else:
+            self.loop.add_reader(self.fd, self._on_stdin)
+            try:
+                self.loop.add_signal_handler(signal.SIGWINCH, self.dirty.set)
+            except (NotImplementedError, ValueError, OSError):
+                pass
 
         async def ticker():
             while True:
@@ -465,11 +555,16 @@ class Tui:
                 await asyncio.sleep(0.05)   # coalesce redraw bursts
         finally:
             tick_task.cancel()
-            try:
-                self.loop.remove_reader(self.fd)
-            except (ValueError, OSError):
-                pass
+            if IS_WINDOWS:
+                if win_input_task:
+                    win_input_task.cancel()
+            else:
+                try:
+                    self.loop.remove_reader(self.fd)
+                except (ValueError, OSError):
+                    pass
             sys.stdout.write(ALT_OFF)
             sys.stdout.flush()
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, old)
+            if not IS_WINDOWS:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, old)
             print("server stopped — thanks for hosting game night!")

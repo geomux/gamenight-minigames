@@ -19,12 +19,16 @@ pluggable shell, so adding more is easy (see [Extending](#extending)).
 
 ## Quickstart (host)
 
-Needs Python 3.11+ (Debian 12/13, Ubuntu 22.04+ are fine). No installs.
+Needs Python 3.11+. Runs on Linux, macOS, and Windows (Debian 12/13,
+Ubuntu 22.04+, and Windows 10+ are all fine). No installs.
 
 ```bash
 cd gamenight-minigame
 python3 server/main.py
 ```
+
+On Windows use `python server\main.py` (the dashboard, colors, and keyboard
+menu all work in Windows Terminal, PowerShell, or cmd on Windows 10+).
 
 The terminal prints the join URL and the **host password**. Open the URL in
 your own browser, type your name **and the host password** → you're the Host

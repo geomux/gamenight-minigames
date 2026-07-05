@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import httpws
 from room import Room
 
+IS_WINDOWS = sys.platform == "win32"
+
 ROOT = Path(__file__).resolve().parent.parent
 CLIENT_DIR = ROOT / "client"
 
@@ -213,30 +215,71 @@ async def amain(cfg):
         banner(cfg)
         loop = asyncio.get_event_loop()
 
-        def on_stdin():
-            line = sys.stdin.readline()
+        def handle_line(line):
+            """Feed one console line to the room; returns False to stop reading
+            (EOF), True to keep going."""
             if not line:                       # EOF (piped stdin closed)
-                try:
-                    loop.remove_reader(sys.stdin.fileno())
-                except (ValueError, OSError):
-                    pass
-                return
+                return False
             try:
                 reply = room.console(line)
             except SystemExit:
                 print("bye!")
                 for task in asyncio.all_tasks(loop):
                     task.cancel()
-                return
+                return False
             if reply:
                 print(reply)
+            return True
+
+        console_task = None
+        if IS_WINDOWS:
+            # Windows asyncio has no add_reader for stdin. Read lines on a
+            # daemon thread (blocking readline gives native console line-
+            # editing) and hand them to the event loop via a queue, so typed
+            # commands still work in plain no-tui mode. The thread is a daemon
+            # so a blocked readline never keeps the process from exiting.
+            import threading
+
+            line_q = asyncio.Queue()
+
+            def _reader():
+                while True:
+                    try:
+                        line = sys.stdin.readline()
+                    except (ValueError, OSError):
+                        line = ""
+                    loop.call_soon_threadsafe(line_q.put_nowait, line or None)
+                    if not line:
+                        return
+
+            threading.Thread(target=_reader, daemon=True).start()
+
+            async def _consume():
+                while True:
+                    line = await line_q.get()
+                    if line is None or not handle_line(line):
+                        return
+
+            console_task = asyncio.create_task(_consume())
+        else:
+            def on_stdin():
+                line = sys.stdin.readline()
+                if not handle_line(line):
+                    try:
+                        loop.remove_reader(sys.stdin.fileno())
+                    except (ValueError, OSError):
+                        pass
+
+            try:
+                loop.add_reader(sys.stdin.fileno(), on_stdin)
+            except (ValueError, OSError, NotImplementedError):
+                print("(no interactive terminal — use the host password web panel)")
 
         try:
-            loop.add_reader(sys.stdin.fileno(), on_stdin)
-        except (ValueError, OSError, NotImplementedError):
-            print("(no interactive terminal — use the host password web panel)")
-
-        await room.run()
+            await room.run()
+        finally:
+            if console_task:
+                console_task.cancel()
     finally:
         if tunnel_proc:
             tunnel_proc.terminate()
