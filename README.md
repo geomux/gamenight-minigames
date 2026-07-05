@@ -10,8 +10,9 @@ pip, no accounts, no paid services.
 
 **Games so far:** Sumo Ring (bump friends off a shrinking ring), Light
 Cycles (Tron — dodge walls and trails), Avalanche Run (ski the endless
-black diamond, snowball your friends, outrun the avalanche), and Aces High
-(steampunk dogfight over the clouds). All four run through the same
+black diamond, snowball your friends, outrun the avalanche), Aces High
+(steampunk dogfight over the clouds), and Bumper Ball (team soccer brawl —
+bump the ball into their goal). All five run through the same
 pluggable shell, so adding more is easy (see [Extending](#extending)).
 
 ---
@@ -77,10 +78,16 @@ ESC again also resumes. (Terminal: `pause` / `resume`, or `p` in the
 dashboard.)
 
 **Controls:** WASD / arrows to move (turn/bank in Cycles and Aces High) ·
-SPACE for your action — dash, snowball, or fire. A **big charge meter** on
-the right side of the screen fills up and pulses gold when your action is
-ready. If you disconnect or refresh, you get your seat, name, and points
-back automatically.
+SPACE for your action — dash, boost, snowball, or fire. A **big charge
+meter** on the right side of the screen fills up and pulses gold when your
+action is ready. If you disconnect or refresh, you get your seat, name, and
+points back automatically.
+
+**On a phone:** the same controls show up as a floating joystick (left thumb,
+drag from anywhere in the left half) and a big hold-to-fire action button
+(right thumb) — no keyboard needed. Tap the speaker icon to mute; all the
+sound is a tiny synth (oscillators + noise bursts, no audio files), so it
+works offline and loads instantly.
 
 ### The games
 
@@ -88,8 +95,10 @@ back automatically.
   the ring shrinks so nobody can turtle. Dash for big plays; dashing bumps
   hit ~2× harder. Last one standing wins.
 - **Light Cycles** — everyone rides constantly, leaving a solid trail. Walls,
-  trails, other players: touch anything and you're out. Optional wraparound
-  edges, vanishing dead trails, and closing walls.
+  trails, other players: touch anything and you're out. Hold SPACE to
+  **boost** — burns a meter for a burst of speed (great for escaping a
+  closing wall or a trail pocket), then regenerates while you ease off.
+  Optional wraparound edges, vanishing dead trails, and closing walls.
 - **Avalanche Run** — the mountain scrolls under everyone and keeps speeding
   up while an avalanche chews the top of the screen. Dodge trees and rocks
   (bonk = tumble = the avalanche gains on you), pelt friends with snowballs
@@ -102,12 +111,19 @@ back automatically.
   (animated swirls) shove you along their direction — ride one for a speed
   boost. Both are settings (none / few / lots). Last ace flying wins; at the
   time cap, most hearts.
+- **Bumper Ball** — team soccer with Sumo Ring's bump physics: knock the ball
+  (much lighter than a player, so it really flies) past the other team's
+  goal line. Dash into it for a harder kick. Every goal triggers a brief
+  kickoff freeze so both teams re-spot before play resumes. Teams split
+  evenly by join order, so bots balance automatically. First to the goal
+  target wins, or whoever's ahead at the time cap (tie = draw) — nobody's
+  ever eliminated, so latecomers and reconnects always drop right back in.
 
 ### Bots
 
 Set **Bots** (0–6) and **Bot skill** (easy / normal / mean) in Game Settings —
 great for testing solo (`bots 3` in the terminal) or filling out small groups.
-Bots play all four games, show up on the scoreboard like anyone else, and
+Bots play all five games, show up on the scoreboard like anyone else, and
 answer to names like Paarthurnax, Saitama, Leeroy Jenkins, and Big Smoke.
 (Bot count is a per-game setting — set it for the game you're about to play.)
 
@@ -131,7 +147,7 @@ tells you why (e.g. nobody connected yet — add bots or share the URL).
 `--no-tui`) takes typed commands:
 
 ```
-start           begin a round            game <id>          sumo|cycles|ski|planes
+start           begin a round            game <id>          sumo|cycles|ski|planes|bumper
 pause / resume  freeze the round         set <key> <value>  change a setting
 lobby           back to the lobby        settings           show current settings
 abort           kill a stuck round
@@ -151,8 +167,8 @@ say <message>   toast to all players     quit               stop the server
 | `host_password` | `"change-me"` | Grants Host in the browser. Empty → random per run, printed |
 | `join_password` | `""` | Required from everyone if set |
 | `max_players` | `12` | Human connection cap |
-| `--tick-rate` | `30` | Simulation Hz (flag only) |
-| `--snapshot-rate` | `15` | Broadcast Hz (flag only) |
+| `--tick-rate` | `60` | Simulation Hz (flag only) |
+| `--snapshot-rate` | `20` | Broadcast Hz (flag only) |
 
 ## Extending
 
@@ -186,7 +202,7 @@ python3 tools/tui_test.py      # drives the terminal dashboard through a pty
 node tools/render_check.js     # exercises every game's canvas draw path
 ```
 
-`smoke_test.py` boots the real server and plays **all four games** end-to-end:
+`smoke_test.py` boots the real server and plays **all five games** end-to-end:
 lobby, passwords, settings, bot rounds, scoring, reconnect, terminal commands,
 kick. `tui_test.py` types real arrow keys into the dashboard. All passing
 means the game actually works headless.
@@ -216,3 +232,8 @@ means the game actually works headless.
   stale snapshots are dropped instead of piling up.
 - **Light Cycles syncs trail *deltas***, not the whole trail, so bandwidth
   stays flat over long rounds even through a free tunnel.
+- **Projectiles dead-reckon instead of interpolating:** snowballs, bullets,
+  and the Bumper Ball ball carry velocity in the snapshot, and the client
+  extrapolates position from that velocity every frame instead of just
+  tweening between snapshot points. Fast objects stay perfectly smooth and
+  straight at 60fps even though snapshots only arrive at ~20Hz.

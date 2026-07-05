@@ -74,6 +74,19 @@ carries the static geometry: `"islands":[[x,y,r]…]` (solid — planes bounce,
 bullets stop) and `"gusts":[[x,y,r,ang100]…]` (directional shove zones;
 clients animate them and detect boost locally, zero extra wire cost).
 
+**Bumper Ball** — `{"t":"s","g":"bumper","score":[r,b],"e":[[pid,x,y,alive,dash01]…],"ball":[x,y,vx,vy],"ko"?:secs}`
+`score` = `[red goals, blue goals]`. `e` rows have no radius field — bodies
+are a fixed size and nobody is ever eliminated, so `alive` is always 1;
+`dash01` stays 0 whenever the `dash` setting is off. `ball` carries `vx`/`vy`
+(world px/s, rounded ints) so clients dead-reckon a smooth 60fps ball exactly
+like the ski/planes projectile registries, keyed on a single fixed id instead
+of a per-projectile one. `ko`, when present, is the seconds remaining in the
+post-goal kickoff freeze — a brief window (~1.4s) where the sim keeps ticking
+and snapshots keep flowing, but movement/scoring are paused while everyone
+re-spots. The arena payload carries `"teams":[[redPids…],[bluePids…]]` (roster
+alternates onto the two teams so bots split evenly) and `"goalH"` (opening
+height of both goal mouths, centered on the world's left/right edges).
+
 ### Fx events
 
 | Event | Shape | Meaning |
@@ -95,6 +108,7 @@ clients animate them and detect boost locally, zero extra wire cost).
 | down | `["down",pid,x,y]` | Plane destroyed (explosion + tumble) |
 | thud | `["thud",pid,x,y]` | Plane bounced off a floating island |
 | puff | `["puff",x,y]` | Bullet absorbed by an island |
+| goal | `["goal",team,x,y]` | Ball fully crossed a goal line (`team` = 0 red / 1 blue is whoever SCORED); a kickoff reset follows unless that goal just won the round |
 
 ### Settings schema
 
