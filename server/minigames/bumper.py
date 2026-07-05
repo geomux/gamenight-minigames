@@ -23,11 +23,11 @@ CX, CY = WORLD_W / 2, WORLD_H / 2
 
 # ---- player body (sumo's numbers as the starting point) ----
 P_R = 13.0
-P_ACCEL = 1150.0
+P_ACCEL = 2500.0
 P_DRAG = 4.0
-P_VMAX = 305.0
+P_VMAX = 600.0
 P_BUMP_E = 0.35
-P_BUMP_BOOST = 210.0
+P_BUMP_BOOST = 2500.0
 WALL_E = 0.5            # player wall-bounce restitution
 
 DASH_V = 430.0
